@@ -5,6 +5,7 @@ from sklearn.preprocessing import normalize
 from sklearn.decomposition import PCA
 import os
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+from uav import UAVNode
 
 import rospy
 from gazebo_msgs.msg import ModelStates
@@ -16,6 +17,8 @@ class ComplexNetworks:
         self.adj_matrix = adj_matrix  # 邻接矩阵
         self.graph = nx.from_numpy_array(adj_matrix)
         self.calculate_param()
+        self.is_wired = False
+        self.nodes_MY = []
 
     def calculate_param(self):
         self.degree = nx.degree(self.graph)  # 度
@@ -133,14 +136,71 @@ class ComplexNetworks:
         plt.draw()
         plt.pause(0.001)
 
+    # TODO 此处进行联网
+    def wire_distance(
+        self,
+        init_sizeof_network,
+        sorted_model_states,
+    ):
+        num_nodes = len(sorted_model_states)
+        if not self.is_wired:
+            for i in range(num_nodes):
+                if i < init_sizeof_network:
+                    node_MY = UAVNode(i, sorted_model_states[i][1])
+                    node_MY.all_connect(self.nodes_MY)
+                    self.nodes_MY.append(node_MY)
+                else:
+                    node_MY = UAVNode(i, sorted_model_states[i][1])
+                    node_MY.connect(self.nodes_MY)
+                    self.nodes_MY.append(node_MY)
+            for i in range(num_nodes):
+                if i == 0 or i == 1:
+                    pass
+                else:
+                    self.nodes_MY[i].connect(self.nodes_MY)
+                connected_nodes = self.nodes_MY[i].wired_nodes
+                for j in connected_nodes:
+                    global_adj_matrix[i, j] = 1
+            self.is_wired = True
+            print(global_adj_matrix)
+        else:
+            # 动态监视距离
+            for i in range(num_nodes):
+                self.nodes_MY[i].pos = [
+                    sorted_model_states[i][1].position.x,
+                    sorted_model_states[i][1].position.y,
+                    sorted_model_states[i][1].position.z,
+                ]
+                check_nodes = self.nodes_MY[i].wired_nodes
+                for ID in check_nodes:
+                    # self.nodes_MY[ID].pos
+                    dis = calculate_distance(
+                        self.nodes_MY[i].pos, sorted_model_states[ID][1].position
+                    )
+                    if dis > 5.0:
+                        print((i, ID))
+                        self.nodes_MY[i].wired_nodes.remove(ID)
+            # 重连
+            for i in range(num_nodes):
+                if i == 0 or i == 1:
+                    pass
+                else:
+                    self.nodes_MY[i].connect(self.nodes_MY)
+                connected_nodes = self.nodes_MY[i].wired_nodes
+                for j in connected_nodes:
+                    global_adj_matrix[i, j] = 1
+            print(global_adj_matrix)
+
 
 def calculate_distance(pose1, pose2):
     # 计算两个姿态之间的欧氏距离
-    position1 = pose1.position
-    position2 = pose2.position
-    dx = position1.x - position2.x
-    dy = position1.y - position2.y
-    dz = position1.z - position2.z
+    # dx = pose1.x - pose2.x
+    # dy = pose1.y - pose2.y
+    # dz = pose1.z - pose2.z
+    dx = pose1[0] - pose2.x
+    dy = pose1[1] - pose2.y
+    dz = pose1[2] - pose2.z
+
     distance = np.sqrt(dx**2 + dy**2 + dz**2)
     return distance
 
@@ -153,59 +213,55 @@ def update_graph_callback(msg):
     sorted_model_states = sorted(model_states, key=lambda x: eval(x[0].split("_")[1]))
 
     num_nodes = len(sorted_model_states)
+    # 进行联网
     global global_adj_matrix
-    global_adj_matrix = np.zeros((num_nodes, num_nodes), dtype=int)
-    for i in range(num_nodes):
-        for j in range(i + 1, num_nodes):
-            distance = calculate_distance(
-                sorted_model_states[i][1], sorted_model_states[j][1]
-            )
-            if distance < 5:
-                global_adj_matrix[i, j] = 1
-                global_adj_matrix[j, i] = 1
+    global_adj_matrix = np.zeros((NUM, NUM), dtype=int)
+    complex_networks.wire_distance(2, sorted_model_states)
 
 
 if __name__ == "__main__":
     NUM = 36
     global_node_name = [" "] * NUM
     print(global_node_name)
+    global_adj_matrix = np.zeros((NUM, NUM), dtype=int)
+    complex_networks = ComplexNetworks(global_adj_matrix)
+
     rospy.init_node("pose_subscriber")
     rospy.Subscriber(
         "gazebo/model_states", ModelStates, update_graph_callback, queue_size=1
     )
     rate = rospy.Rate(30)
-    global_adj_matrix = np.zeros((NUM, NUM), dtype=int)
-    complex_networks = ComplexNetworks(global_adj_matrix)
-    # fig, ax = plt.subplots()
+    fig, ax = plt.subplots()
     while not rospy.is_shutdown():
         complex_networks.update_graph(global_adj_matrix)
-        x = list(range(0, NUM))
-        plt.figure(1)
-        plt.plot(
-            x,
-            list(complex_networks.degree_centrality.values()),
-            label="Degree Centrality",
-        )
-        plt.plot(
-            x,
-            list(complex_networks.betweenness_centrality.values()),
-            label="Betweenness Centrality",
-        )
-        plt.plot(
-            x,
-            list(complex_networks.closeness_centrality.values()),
-            label="Closeness Centrality",
-        )
-        plt.plot(
-            x,
-            list(complex_networks.topsis_weights),
-            label="TOPSIS Centrality",
-        )
-        plt.legend(fontsize="large")
-        plt.figure(2)
-        nx.draw(complex_networks.graph, node_size=500, with_labels=True)
-        plt.show()
-        # complex_networks.visualization(ax)
+        # x = list(range(0, NUM))
+        # plt.figure(1)
+        # plt.plot(
+        #     x,
+        #     list(complex_networks.degree_centrality.values()),
+        #     label="Degree Centrality",
+        # )
+        # plt.plot(
+        #     x,
+        #     list(complex_networks.betweenness_centrality.values()),
+        #     label="Betweenness Centrality",
+        # )
+        # plt.plot(
+        #     x,
+        #     list(complex_networks.closeness_centrality.values()),
+        #     label="Closeness Centrality",
+        # )
+        # plt.plot(
+        #     x,
+        #     list(complex_networks.topsis_weights),
+        #     label="TOPSIS Centrality",
+        # )
+        # plt.legend(fontsize="large")
+        # plt.figure(2)
+        # nx.draw(complex_networks.graph, node_size=500, with_labels=True)
+        # plt.show()
+
+        complex_networks.visualization(ax)
         try:
             rate.sleep()
         except:
