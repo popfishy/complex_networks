@@ -106,6 +106,7 @@ def pose_publisher(mode):
 
 if __name__ == "__main__":
     rospy.init_node("pose_publisher")
+    # TODO 增加请求应答节点，杀死损坏节点
     try:
         pose_publisher(mode="random")
     except rospy.ROSInterruptException:
