@@ -1,48 +1,27 @@
+# 导入库
+import networkx as nx
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-import numpy as np
 
-formation_dict_18 = {
-    "origin": np.array(
-        [
-            [3, 0, 0],
-            [6, 0, 0],
-            [0, 3, 0],
-            [3, 3, 0],
-            [6, 3, 0],
-            [0, 6, 0],
-            [3, 6, 0],
-            [6, 6, 0],
-            [0, 9, 0],
-            [3, 9, 0],
-            [6, 9, 0],
-            [0, 12, 0],
-            [3, 12, 0],
-            [6, 12, 0],
-            [0, 15, 0],
-            [3, 15, 0],
-            [6, 15, 0],
-        ]
-    ),
-}
+# G = nx.Graph()
+# G.add_nodes_from([0, 1, 2, 3, 4])
+# G.add_edges_from([(0, 1), (0, 2), (1, 3), (1, 2), (1, 4), (3, 4)])
+# # 邻接矩阵
+# As = nx.adjacency_matrix(G)
+# A = As.todense()
 
-fig = plt.figure()
-ax = fig.add_subplot(111, projection="3d")
+# # 两个节点间的一条最短路径
+# shortest_path = nx.shortest_path(G, source=0, target=3)
+# print("两个节点间的一条最短路径: ", shortest_path)
 
-# 绘制形状的点
-coords = formation_dict_18["origin"]
-x = coords[:, 0]
-y = coords[:, 1]
-z = coords[:, 2]
-ax.scatter(x, y, z, label="origin")
+# # 两个节点之间所有的最短路径
+# all_shortest_path = list(nx.all_shortest_paths(G, source=0, target=3))
+# print("两个节点之间所有的最短路径: ", all_shortest_path)
 
-# 标记坐标轴
-ax.set_xlabel("X")
-ax.set_ylabel("Y")
-ax.set_zlabel("Z")
+# # 求两个节点的最短路径长度（距离）
+# shortest_dis = nx.shortest_path_length(G, source=0, target=3)
+# print("两个节点的最短路径长度（距离）: ", shortest_dis)
 
-# 显示图例
-ax.legend()
-
-# 显示图形
-plt.show()
+# nx.draw(G, node_size=1000, with_labels=True)
+# plt.show()
+for i in range(5):
+    print(i)

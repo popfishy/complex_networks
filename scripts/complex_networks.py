@@ -5,11 +5,26 @@ from sklearn.preprocessing import normalize
 from sklearn.decomposition import PCA
 import os
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
-from uav import UAVNode
+from enum import Enum
+import random
 
+from uav import UAVNode
+from globals import *
+from uav_msg import UAVMsg
 import rospy
 from gazebo_msgs.msg import ModelStates
 from geometry_msgs.msg import Pose, Twist
+
+# global variable
+DEBUG = False
+global_node_name = [" "] * NUM
+global_adj_matrix = np.zeros((NUM, NUM), dtype=int)
+sorted_model_states = []
+
+
+class ThreatMode(Enum):
+    PickUavWithMaxLink = 0
+    PickUavRandom = 1
 
 
 class ComplexNetworks:
@@ -19,6 +34,7 @@ class ComplexNetworks:
         self.calculate_param()
         self.is_wired = False
         self.nodes_MY = []
+        self.threatMode = ThreatMode.PickUavWithMaxLink
 
     def calculate_param(self):
         self.degree = nx.degree(self.graph)  # 度
@@ -140,56 +156,94 @@ class ComplexNetworks:
     def wire_distance(
         self,
         init_sizeof_network,
-        sorted_model_states,
     ):
-        num_nodes = len(sorted_model_states)
-        if not self.is_wired:
-            for i in range(num_nodes):
-                if i < init_sizeof_network:
-                    node_MY = UAVNode(i, sorted_model_states[i][1])
-                    node_MY.all_connect(self.nodes_MY)
-                    self.nodes_MY.append(node_MY)
-                else:
-                    node_MY = UAVNode(i, sorted_model_states[i][1])
-                    node_MY.connect(self.nodes_MY)
-                    self.nodes_MY.append(node_MY)
-            for i in range(num_nodes):
-                if i == 0 or i == 1:
-                    pass
-                else:
-                    self.nodes_MY[i].connect(self.nodes_MY)
-                connected_nodes = self.nodes_MY[i].wired_nodes
-                for j in connected_nodes:
-                    global_adj_matrix[i, j] = 1
-            self.is_wired = True
-            print(global_adj_matrix)
-        else:
-            # 动态监视距离
-            for i in range(num_nodes):
-                self.nodes_MY[i].pos = [
-                    sorted_model_states[i][1].position.x,
-                    sorted_model_states[i][1].position.y,
-                    sorted_model_states[i][1].position.z,
+        global sorted_model_states, global_adj_matrix
+        for i in range(NUM):
+            if i < init_sizeof_network:
+                node_MY = UAVNode(i, sorted_model_states[i][1])
+                node_MY.all_connect(self.nodes_MY)
+                self.nodes_MY.append(node_MY)
+            else:
+                node_MY = UAVNode(i, sorted_model_states[i][1])
+                node_MY.connect(self.nodes_MY)
+                self.nodes_MY.append(node_MY)
+        for i in range(NUM):
+            if i == 0 or i == 1:
+                pass
+            else:
+                self.nodes_MY[i].connect(self.nodes_MY)
+            connected_nodes = self.nodes_MY[i].wired_nodes
+            for j in connected_nodes:
+                global_adj_matrix[i, j] = 1
+        self.is_wired = True
+        if DEBUG:
+            print("global_adj_matrix: ", global_adj_matrix)
+
+    # TODO 逻辑错误，对于单个无边节点进行重连，不需要重置global_adj_matrix
+    def rewire(self, event):
+        global sorted_model_states, global_adj_matrix
+        global_adj_matrix = np.zeros((NUM, NUM), dtype=int)
+        # 动态监视距离
+        # TODO 增加消息生成功能
+        for i in range(NUM):
+            self.nodes_MY[i].pos = [
+                sorted_model_states[i][1].position.x,
+                sorted_model_states[i][1].position.y,
+                sorted_model_states[i][1].position.z,
+            ]
+            check_nodes = self.nodes_MY[i].wired_nodes
+            for ID in check_nodes:
+                # self.nodes_MY[ID].pos
+                pos = [
+                    sorted_model_states[ID][1].position.x,
+                    sorted_model_states[ID][1].position.y,
+                    sorted_model_states[ID][1].position.z,
                 ]
-                check_nodes = self.nodes_MY[i].wired_nodes
-                for ID in check_nodes:
-                    # self.nodes_MY[ID].pos
-                    dis = calculate_distance(
-                        self.nodes_MY[i].pos, sorted_model_states[ID][1].position
-                    )
-                    if dis > 5.0:
-                        print((i, ID))
-                        self.nodes_MY[i].wired_nodes.remove(ID)
-            # 重连
-            for i in range(num_nodes):
-                if i == 0 or i == 1:
-                    pass
-                else:
-                    self.nodes_MY[i].connect(self.nodes_MY)
-                connected_nodes = self.nodes_MY[i].wired_nodes
-                for j in connected_nodes:
-                    global_adj_matrix[i, j] = 1
-            print(global_adj_matrix)
+                dis = calculate_distance(self.nodes_MY[i].pos, pos)
+                if dis > WireVar.rc:
+                    self.nodes_MY[i].wired_nodes.remove(ID)
+        # 重连
+        for i in range(NUM):
+            if i == 0 or i == 1:
+                pass
+            else:
+                self.nodes_MY[i].connect(self.nodes_MY)
+            connected_nodes = self.nodes_MY[i].wired_nodes
+            for j in connected_nodes:
+                global_adj_matrix[i, j] = 1
+        if DEBUG:
+            print("global_adj_matrix: ", global_adj_matrix)
+
+    # 打击毁伤功能
+    def chooseTargeUavAndKill(self, event):
+        timer_rewire = rospy.Timer(
+            rospy.Duration(intervalOfRemove * 0.05),
+            complex_networks.rewire,
+            oneshot=True,
+        )
+        if self.threatMode == ThreatMode.PickUavWithMaxLink:
+            max_degree_node = max(self.graph, key=lambda x: x[1])[0]
+            print("节点： ", max_degree_node)
+            self.nodes_MY[max_degree_node].is_damaged = True
+            self.nodes_MY[max_degree_node].wired_nodes = []
+            for i in range(NUM):
+                self.adj_matrix[max_degree_node][i] = 0
+                self.adj_matrix[i][max_degree_node] = 0
+        else:
+            random_node = random.randint(0, NUM - 1)
+            self.nodes_MY[random_node].is_damaged = True
+            self.nodes_MY[random_node].wired_nodes = []
+            self.adj_matrix[random_node][i] = 0
+            self.adj_matrix[i][random_node] = 0
+
+    # 每0.1s产生一个序列
+    def msgGenerator(self, event):
+        for i in range(NUM):
+
+            prob = random.random()
+            if prob > msgGeneratorProb:
+                uav_msg = UAVMsg([i, 5])
+                self.nodes_MY[i].msgs.append(uav_msg)
 
 
 def calculate_distance(pose1, pose2):
@@ -197,9 +251,9 @@ def calculate_distance(pose1, pose2):
     # dx = pose1.x - pose2.x
     # dy = pose1.y - pose2.y
     # dz = pose1.z - pose2.z
-    dx = pose1[0] - pose2.x
-    dy = pose1[1] - pose2.y
-    dz = pose1[2] - pose2.z
+    dx = pose1[0] - pose2[0]
+    dy = pose1[1] - pose2[1]
+    dz = pose1[2] - pose2[2]
 
     distance = np.sqrt(dx**2 + dy**2 + dz**2)
     return distance
@@ -207,30 +261,28 @@ def calculate_distance(pose1, pose2):
 
 # 预设距离阈值
 def update_graph_callback(msg):
-    global global_node_name
+    global global_node_name, sorted_model_states, global_adj_matrix
     global_node_name = sorted(msg.name[1:], key=lambda x: eval(x.split("_")[1]))
     model_states = list(zip(msg.name, msg.pose, msg.twist))[1:]
     sorted_model_states = sorted(model_states, key=lambda x: eval(x[0].split("_")[1]))
 
-    num_nodes = len(sorted_model_states)
     # 进行联网
-    global global_adj_matrix
-    global_adj_matrix = np.zeros((NUM, NUM), dtype=int)
-    complex_networks.wire_distance(2, sorted_model_states)
+    if not complex_networks.is_wired:
+        complex_networks.wire_distance(2)
 
 
 if __name__ == "__main__":
-    NUM = 36
-    global_node_name = [" "] * NUM
-    print(global_node_name)
-    global_adj_matrix = np.zeros((NUM, NUM), dtype=int)
     complex_networks = ComplexNetworks(global_adj_matrix)
 
     rospy.init_node("pose_subscriber")
     rospy.Subscriber(
         "gazebo/model_states", ModelStates, update_graph_callback, queue_size=1
     )
-    rate = rospy.Rate(30)
+    timer_threat = rospy.Timer(
+        rospy.Duration(intervalOfRemove * 0.1), complex_networks.chooseTargeUavAndKill
+    )
+
+    rate = rospy.Rate(10)
     fig, ax = plt.subplots()
     while not rospy.is_shutdown():
         complex_networks.update_graph(global_adj_matrix)

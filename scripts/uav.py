@@ -1,7 +1,8 @@
-from enum import Enum
 import cv2
 import random
 import numpy as np
+from globals import WireVar
+from collections import deque
 
 
 class UAVNode:
@@ -9,11 +10,16 @@ class UAVNode:
         self.ID = ID
         self.pos = [0, 0, 0]
         self.wired_nodes = []
+        self.msgs = deque(maxlen=200)
+        # TODO have not used
+        self.is_damaged = False
 
     def __init__(self, ID, pose):
         self.ID = ID
         self.pos = [pose.position.x, pose.position.y, pose.position.z]
         self.wired_nodes = []
+        self.msgs = deque(maxlen=200)
+        self.is_damaged = False
         # self.MaxSenceProbability = 0.9
 
     def all_connect(self, nodes):
@@ -27,11 +33,9 @@ class UAVNode:
     # reference: 《基于信息交互的无人机集群建模与韧性评估》
     def connect(self, nodes):
         # 参考p25公式：rc为通信距离
-        rc = 5.0
-        gama = -5
-        beta = 0.8
-        e = 0.1
-        alfa = 0.8
+        rc = WireVar.rc
+        e = WireVar.e
+        alpha = WireVar.alpha
 
         sum_k = 0.0
         for node in nodes:
@@ -41,10 +45,10 @@ class UAVNode:
                 and self.get_distance(node) < rc
             ):
                 d = self.get_distance(node)
-                if d < alfa * rc:
+                if d < alpha * rc:
                     sum_k += len(node.wired_nodes) + e
                 else:
-                    sum_k += (len(node.wired_nodes) + e) * (rc - d) / (rc - alfa * rc)
+                    sum_k += (len(node.wired_nodes) + e) * (rc - d) / (rc - alpha * rc)
         if sum_k == 0.0:
             # print("sum_k == 0, ID =", self.ID)
             pass
@@ -58,11 +62,11 @@ class UAVNode:
                     and self.get_distance(node) < rc
                 ):
                     d = self.get_distance(node)
-                    if d < alfa * rc:
+                    if d < alpha * rc:
                         count += len(node.wired_nodes) + e
                     else:
                         count += (
-                            (len(node.wired_nodes) + e) * (rc - d) / (rc - alfa * rc)
+                            (len(node.wired_nodes) + e) * (rc - d) / (rc - alpha * rc)
                         )
 
                 if count > chose:
