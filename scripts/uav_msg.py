@@ -15,7 +15,7 @@ class UAVMsg:
 
     def updateShortPath(self, shortPath):
         self.shortPath = shortPath
-        self.nowID = shortPath[1]
+        self.nowID = shortPath[0]
         self.stepCount = self.stepCount + 1
         if self.nowID == self.targetID or self.stepCount > 10:
             self.removeFlag = True

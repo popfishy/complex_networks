@@ -31,12 +31,12 @@ class ComplexNetworks:
     def __init__(self, adj_matrix):
         self.adj_matrix = adj_matrix  # 邻接矩阵
         self.graph = nx.from_numpy_array(adj_matrix)
-        self.calculate_param()
+        self.calculateParam()
         self.is_wired = False
         self.nodes_MY = []
         self.threatMode = ThreatMode.PickUavWithMaxLink
 
-    def calculate_param(self):
+    def calculateParam(self):
         self.degree = nx.degree(self.graph)  # 度
         self.clustering_coefficient = nx.clustering(self.graph)  # 聚类系数
         self.laplacian_matrix = nx.laplacian_matrix(self.graph)  # 拉普拉斯矩阵
@@ -49,18 +49,18 @@ class ComplexNetworks:
         #     self.graph
         # )  # 特征向量中心性
         # self.katz_centrality = nx.katz_centrality(self.graph)  # Katz中心性
-        self.topsis_weights = self.calculate_topsis()
+        self.topsis_weights = self.calculateTopsis()
 
-    def update_graph(self, new_adj_matrix):
+    def updateGraph(self, new_adj_matrix):
         self.adj_matrix = new_adj_matrix
         self.graph = nx.from_numpy_array(new_adj_matrix)
-        self.calculate_param()
+        self.calculateParam()
 
     def update_graph_by_json(self, json_data):
         # 通过json数据更新图
         pass
 
-    def calculate_topsis(self):
+    def calculateTopsis(self):
         # topsis算法: 取度中心性、介数中心性、紧密中心性三个指标
         # Step 1: Given original decision matrix and normalize it
         decision_matrix = np.array(
@@ -90,7 +90,7 @@ class ComplexNetworks:
         )
         return topsis_weights
 
-    def degree_pdf(self):
+    def degreePdf(self):
         # 度分布
         x = list(range(max(self.degree.values()) + 1))
         y = [i / len(self.graph.nodes) for i in nx.degree_histogram(self.graph)]
@@ -152,8 +152,18 @@ class ComplexNetworks:
         plt.draw()
         plt.pause(0.001)
 
+    def getNumberOfAliveUavs(self):
+        alive_uav_number = 0
+        for node in self.nodes_MY:
+            alive_uav_number = alive_uav_number + node.is_damaged
+        return alive_uav_number
+
+    def NLinkIDSizeOfUavs(self, taregt_id):
+        target_node = self.nodes_MY[taregt_id]
+        return len(target_node.wired_nodes)
+
     # TODO 此处进行联网
-    def wire_distance(
+    def wireDistance(
         self,
         init_sizeof_network,
     ):
@@ -179,7 +189,7 @@ class ComplexNetworks:
         if DEBUG:
             print("global_adj_matrix: ", global_adj_matrix)
 
-    # TODO 逻辑错误，对于单个无边节点进行重连，不需要重置global_adj_matrix
+    # TODO 逻辑错误，对于单个无边节点进行重连，不需要重置global_adj_matrix  ？？？？可能不存在错误？ self.nodes_MY中数据存在
     def rewire(self, event):
         global sorted_model_states, global_adj_matrix
         global_adj_matrix = np.zeros((NUM, NUM), dtype=int)
@@ -193,15 +203,15 @@ class ComplexNetworks:
             ]
             check_nodes = self.nodes_MY[i].wired_nodes
             for ID in check_nodes:
-                # self.nodes_MY[ID].pos
                 pos = [
                     sorted_model_states[ID][1].position.x,
                     sorted_model_states[ID][1].position.y,
                     sorted_model_states[ID][1].position.z,
                 ]
-                dis = calculate_distance(self.nodes_MY[i].pos, pos)
+                dis = calculateDistance(self.nodes_MY[i].pos, pos)
                 if dis > WireVar.rc:
                     self.nodes_MY[i].wired_nodes.remove(ID)
+                    # TODO adj_matrix删除边
         # 重连
         for i in range(NUM):
             if i == 0 or i == 1:
@@ -210,17 +220,14 @@ class ComplexNetworks:
                 self.nodes_MY[i].connect(self.nodes_MY)
             connected_nodes = self.nodes_MY[i].wired_nodes
             for j in connected_nodes:
+                # # TODO adj_matrix增加边
                 global_adj_matrix[i, j] = 1
         if DEBUG:
             print("global_adj_matrix: ", global_adj_matrix)
 
-    # 打击毁伤功能
+    # 打击毁伤功能  直接使用sleep模块 阻塞延时也没关系，其他callback函数不影响
     def chooseTargeUavAndKill(self, event):
-        timer_rewire = rospy.Timer(
-            rospy.Duration(intervalOfRemove * 0.05),
-            complex_networks.rewire,
-            oneshot=True,
-        )
+        # 毁伤打击
         if self.threatMode == ThreatMode.PickUavWithMaxLink:
             max_degree_node = max(self.graph, key=lambda x: x[1])[0]
             print("节点： ", max_degree_node)
@@ -233,20 +240,54 @@ class ComplexNetworks:
             random_node = random.randint(0, NUM - 1)
             self.nodes_MY[random_node].is_damaged = True
             self.nodes_MY[random_node].wired_nodes = []
-            self.adj_matrix[random_node][i] = 0
-            self.adj_matrix[i][random_node] = 0
+            for i in range(NUM):
+                self.adj_matrix[random_node][i] = 0
+                self.adj_matrix[i][random_node] = 0
+
+        # 50s后启动连接
+        timer_rewire = rospy.Timer(
+            rospy.Duration(intervalOfRemove * 0.05),
+            complex_networks.rewire,
+            oneshot=True,
+        )
+
+        # 数据统计？
 
     # 每0.1s产生一个序列
     def msgGenerator(self, event):
+        # 消息生成
         for i in range(NUM):
+            if self.getNumberOfAliveUavs() > 0:
+                prob = random.random()
+                if prob > (1 - msgGeneratorProb):
+                    target_id = random.randint(0, NUM - 1)
+                    while self.NLinkIDSizeOfUavs(target_id) == 0:
+                        target_id = random.randint(0, NUM - 1)
+                    shortest_path = nx.shortest_path(
+                        self.graph, source=i, target=target_id
+                    )
+                    uav_msg = UAVMsg(shortest_path)
+                    self.nodes_MY[i].msgs.append(uav_msg)
 
-            prob = random.random()
-            if prob > msgGeneratorProb:
-                uav_msg = UAVMsg([i, 5])
-                self.nodes_MY[i].msgs.append(uav_msg)
+        # 消息的传递
+        yt_raw = 0
+        for i in range(NUM):
+            msg_to_remove = []
+            for msg in self.nodes_MY[i].msgs:
+                if msg.soureID == msg.targetID:
+                    yt_raw = yt_raw + 1
+                    msg.removeFlag = True
+                    msg_to_remove.append(msg)
+                else:
+                    shortest_path = nx.shortest_path(
+                        self.graph, source=msg.shortPath[1], target=msg.targetID
+                    )
+                    msg.updateShortPath(shortest_path)
+            for msg_remove in msg_to_remove:
+                self.nodes_MY[i].msgs.remove(msg_remove)
 
 
-def calculate_distance(pose1, pose2):
+def calculateDistance(pose1, pose2):
     # 计算两个姿态之间的欧氏距离
     # dx = pose1.x - pose2.x
     # dy = pose1.y - pose2.y
@@ -260,7 +301,7 @@ def calculate_distance(pose1, pose2):
 
 
 # 预设距离阈值
-def update_graph_callback(msg):
+def updateGraphCallback(msg):
     global global_node_name, sorted_model_states, global_adj_matrix
     global_node_name = sorted(msg.name[1:], key=lambda x: eval(x.split("_")[1]))
     model_states = list(zip(msg.name, msg.pose, msg.twist))[1:]
@@ -268,7 +309,7 @@ def update_graph_callback(msg):
 
     # 进行联网
     if not complex_networks.is_wired:
-        complex_networks.wire_distance(2)
+        complex_networks.wireDistance(2)
 
 
 if __name__ == "__main__":
@@ -276,16 +317,19 @@ if __name__ == "__main__":
 
     rospy.init_node("pose_subscriber")
     rospy.Subscriber(
-        "gazebo/model_states", ModelStates, update_graph_callback, queue_size=1
+        "gazebo/model_states", ModelStates, updateGraphCallback, queue_size=1
     )
     timer_threat = rospy.Timer(
         rospy.Duration(intervalOfRemove * 0.1), complex_networks.chooseTargeUavAndKill
     )
+    timer_msg_generator = rospy.Timer(
+        rospy.Duration(0.1), complex_networks.msgGenerator
+    )
 
-    rate = rospy.Rate(10)
+    rate = rospy.Rate(1)
     fig, ax = plt.subplots()
     while not rospy.is_shutdown():
-        complex_networks.update_graph(global_adj_matrix)
+        complex_networks.updateGraph(global_adj_matrix)
         # x = list(range(0, NUM))
         # plt.figure(1)
         # plt.plot(
@@ -317,4 +361,6 @@ if __name__ == "__main__":
         try:
             rate.sleep()
         except:
+            # 保存数据
+
             continue
