@@ -39,7 +39,7 @@ class uavNode {
   int ID;
   Point pos;
   bool iswired = false;
-
+   
  public:
   vector<int> wirednodes;
 

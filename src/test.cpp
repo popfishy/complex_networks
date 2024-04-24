@@ -1,4 +1,4 @@
-// TODO getYt
+// TODO getYt 每一分钟
 yt_raw = 0;
 for(Msg msg1:msgs)
 {
@@ -10,6 +10,10 @@ for(Msg msg1:msgs)
 	}
 }
 
+
+// 每intervalOfRemove
+// yt_raw为当前时刻到达的消息数量   yts_raw历史时间到达的消息列表  M？  
+// yt为滤波结果  yts为滤波结果列表 NR滤波值与原始数据之间的噪声
 //Rtotal 添加部分
 //if(averageLengthOfMsgs!=0)
 	//yt_raw = yt_raw/averageLengthOfMsgs*5;
@@ -26,14 +30,15 @@ if(end>(2*M+1))
 		gi += yts_raw.get(end-1-i);
 	}
 	gi = gi*c;
-	yt = gi;//计算所得为当前时刻往前M个时刻的数据
+	yt = gi; //计算所得为当前时刻往前M个时刻的数据
 	file_yt.print(yt);
 	file_yt.print("  ");
 	yts.add(yt);
-	double NR = yts_raw.get(end-1-M) - yt;//计算所得为当前时刻往前M个时刻的数据
+	double NR = yts_raw.get(end-1-M) - yt; //计算所得为当前时刻往前M个时刻的数据
 	noise.add(NR);
 }  
 
+// 
 
 // TODO   getRi
 //每200s发生一次打击恢复，计算一次ri，选取感兴趣时间间隔为200s，其中低估100两端各50
