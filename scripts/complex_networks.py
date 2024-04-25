@@ -416,7 +416,7 @@ class ComplexNetworks:
             for i in range(len(Ris)):
                 wi = np.power(1 - alpha, len(Ris) - i)
                 R_total = Ris[i] * wi / sum_wi
-                print("R_total: ", R_total)
+            print("R_total: ", R_total)
             with open("../data/R_total.txt", "a") as file:
                 file.write(str(R_total) + "\n")
 
