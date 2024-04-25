@@ -30,6 +30,9 @@ Ris = []
 FIRST_KILL_FLAG = False
 FIRST_REWIRE_FLAG = False
 FIRST_TOUGHNESS_FLAG = False
+KILL_FLAG = False
+REWIRE_FLAG = False
+TOUGHNESS_FLAG = False
 
 
 class ThreatMode(Enum):
@@ -243,52 +246,8 @@ class ComplexNetworks:
                         global_adj_matrix[i, j] = 1
                         global_adj_matrix[j, i] = 1
 
-    # 毁伤后节点重连
-    def rewire(self, event):
-        global FIRST_REWIRE_FLAG
-        FIRST_REWIRE_FLAG = True
-        global sorted_model_states, global_adj_matrix
-        # global_adj_matrix = np.zeros((NUM, NUM), dtype=int)
-        # 重连
-        for i in range(1, NUM):
-            if i == 1:
-                pass
-            else:
-                if not self.nodes_MY[i].is_damaged:
-                    self.nodes_MY[i].connect(self.nodes_MY)
-            connected_nodes = self.nodes_MY[i].wired_nodes
-            for j in connected_nodes:
-                # TODO adj_matrix增加边
-                global_adj_matrix[i, j] = 1
-                global_adj_matrix[j, i] = 1
-        if DEBUG:
-            print("global_adj_matrix: ", global_adj_matrix)
-        # TODO
-        self.updateGraph(global_adj_matrix)
-        print("The sum of dji when rewire: ", np.sum(self.adj_matrix))
+        # 消息生成
 
-    # 打击毁伤功能
-    def chooseTargeUavAndKill(self, event):
-        global FIRST_KILL_FLAG
-        FIRST_KILL_FLAG = True
-        # 毁伤打击
-        if self.threatMode == ThreatMode.PickUavWithMaxLink:
-            max_degree_node = max(self.graph.degree, key=lambda x: x[1])[0]
-            # print("节点： ", max_degree_node)
-            self.nodes_MY[max_degree_node].is_damaged = True
-            self.nodes_MY[max_degree_node].wired_nodes = []
-            for i in range(NUM):
-                self.adj_matrix[max_degree_node][i] = 0
-                self.adj_matrix[i][max_degree_node] = 0
-        else:
-            random_node = random.randint(0, NUM - 1)
-            self.nodes_MY[random_node].is_damaged = True
-            self.nodes_MY[random_node].wired_nodes = []
-            for i in range(NUM):
-                self.adj_matrix[random_node][i] = 0
-                self.adj_matrix[i][random_node] = 0
-
-    # 消息生成
     def msgGenerator(self, event):
         # 消息生成
         for i in range(NUM):
@@ -344,8 +303,55 @@ class ComplexNetworks:
             noise = yts_raw[len(yts_raw) - M_WINDOW - 1] - yt
             noises.append(noise)
 
+    # 毁伤后节点重连
+    def rewire(self, event):
+        # print("rewire: ", rospy.Time.now().to_sec())
+        global FIRST_REWIRE_FLAG
+        FIRST_REWIRE_FLAG = True
+        global sorted_model_states, global_adj_matrix
+        # global_adj_matrix = np.zeros((NUM, NUM), dtype=int)
+        # 重连
+        for i in range(1, NUM):
+            if i == 1:
+                pass
+            else:
+                if not self.nodes_MY[i].is_damaged:
+                    self.nodes_MY[i].connect(self.nodes_MY)
+            connected_nodes = self.nodes_MY[i].wired_nodes
+            for j in connected_nodes:
+                # TODO adj_matrix增加边
+                global_adj_matrix[i, j] = 1
+                global_adj_matrix[j, i] = 1
+        if DEBUG:
+            print("global_adj_matrix: ", global_adj_matrix)
+        # TODO
+        self.updateGraph(global_adj_matrix)
+
+    # 打击毁伤功能
+    def chooseTargeUavAndKill(self, event):
+        # print("kill: ", rospy.Time.now().to_sec())
+        global FIRST_KILL_FLAG
+        FIRST_KILL_FLAG = True
+        # 毁伤打击
+        if self.threatMode == ThreatMode.PickUavWithMaxLink:
+            max_degree_node = max(self.graph.degree, key=lambda x: x[1])[0]
+            # print("节点： ", max_degree_node)
+            self.nodes_MY[max_degree_node].is_damaged = True
+            self.nodes_MY[max_degree_node].wired_nodes = []
+            for i in range(NUM):
+                self.adj_matrix[max_degree_node][i] = 0
+                self.adj_matrix[i][max_degree_node] = 0
+        else:
+            random_node = random.randint(0, NUM - 1)
+            self.nodes_MY[random_node].is_damaged = True
+            self.nodes_MY[random_node].wired_nodes = []
+            for i in range(NUM):
+                self.adj_matrix[random_node][i] = 0
+                self.adj_matrix[i][random_node] = 0
+
     # 韧性评估
     def calculateToughness(self, event):
+        # print("calculateToughness: ", rospy.Time.now().to_sec())
         global FIRST_TOUGHNESS_FLAG
         FIRST_TOUGHNESS_FLAG = True
         # 计算R_total，数据统计
@@ -360,11 +366,13 @@ class ComplexNetworks:
         for i in range(len(yts)):
             temp = yts[i]
             sum_yt = sum_yt + temp
-            if i < intervalOfRemove * 0.2:
+            if i < intervalOfRemove * 0.1 * 0.2:
                 sum_yD = sum_yD + temp
-            if (i > intervalOfRemove * 0.3) & (i < intervalOfRemove * 0.7):
+            if (i > intervalOfRemove * 0.1 * 0.3) & (i < intervalOfRemove * 0.1 * 0.7):
                 sum_ymin = sum_ymin + temp
-            if (i > intervalOfRemove * 0.73) & (i < intervalOfRemove * 0.98):
+            if (i > intervalOfRemove * 0.1 * 0.73) & (
+                i < intervalOfRemove * 0.1 * 0.98
+            ):
                 sum_yR = sum_yR + temp
             Ps = Ps + temp * temp
             Pn = Pn + noises[i] * noises[i]
@@ -383,13 +391,24 @@ class ComplexNetworks:
             Ri = sigma * rou * (delta + zeta)
         else:
             Ri = sigma * rou * (delta + zeta + 1 - np.power(tau, rou - delta))
+        print("SNRdB:", SNRdB)
+        print("yD:", yD)
+        print("ymin:", ymin)
+        print("yR:", yR)
+        print("sigma:", sigma)
+        print("delta:", delta)
+        print("tau:", tau)
+        print("rou:", rou)
+        print("zeta:", zeta)
+        print("Ri:", Ri)
+
         Ris.append(Ri)
         with open("../data/Ri.txt", "a") as file:
             file.write(str(Ri) + "\n")
         yts = []
         noises = []
 
-        if len(Ris) == 10:
+        if len(Ris) == 5:
             alpha = 0.06
             sum_wi = 0
             for i in range(len(Ris)):
@@ -448,17 +467,19 @@ if __name__ == "__main__":
         "gazebo/model_states", ModelStates, updateGraphCallback, queue_size=1
     )
     rospy.sleep(rospy.Duration(1))
-    print("******************start*****************")
     timer_msg_generator = rospy.Timer(
         rospy.Duration(0.1), complex_networks.msgGenerator
     )
 
+    rospy.sleep(rospy.Duration(3))
     timer_threat = rospy.Timer(
-        rospy.Duration(10), complex_networks.chooseTargeUavAndKill
+        rospy.Duration(5), complex_networks.chooseTargeUavAndKill
     )
-    timer_rewire = rospy.Timer(rospy.Duration(20), complex_networks.rewire)
+    timer_rewire = rospy.Timer(
+        rospy.Duration(5 + intervalOfRemove * 0.1 / 2), complex_networks.rewire
+    )
     timer_toughness = rospy.Timer(
-        rospy.Duration(10 - intervalOfRemove * 0.1 / 4 + 20 + 2 * M_WINDOW * 0.1),
+        rospy.Duration(5 + intervalOfRemove * 0.1 * 3 / 4 + 2 * M_WINDOW * 0.1),
         complex_networks.calculateToughness,
     )
 
@@ -467,17 +488,28 @@ if __name__ == "__main__":
     while not rospy.is_shutdown():
         complex_networks.updateGraph(global_adj_matrix)
         if FIRST_KILL_FLAG == True:
-            print("FIRST_KILL_FLAG: ", rospy.Time.now().to_sec())
-            timer_threat._period = rospy.Duration(20)
-            FIRST_KILL_FLAG = -1
+            if KILL_FLAG == False:
+                KILL_FLAG = True
+                timer_threat.shutdown()
+                timer_threat_new = rospy.Timer(
+                    rospy.Duration(20), complex_networks.chooseTargeUavAndKill
+                )
         if FIRST_REWIRE_FLAG == True:
-            print("FIRST_REWIRE_FLAG: ", rospy.Time.now().to_sec())
-            timer_rewire._period = rospy.Duration(20)
-            FIRST_REWIRE_FLAG = -1
+            if REWIRE_FLAG == False:
+                REWIRE_FLAG = True
+                timer_rewire.shutdown()
+                timer_rewire_new = rospy.Timer(
+                    rospy.Duration(20), complex_networks.rewire
+                )
+
         if FIRST_TOUGHNESS_FLAG == True:
-            print("FIRST_TOUGHNESS_FLAG: ", rospy.Time.now().to_sec())
-            timer_toughness._period = rospy.Duration(20)
-            FIRST_TOUGHNESS_FLAG = -1
+            if TOUGHNESS_FLAG == False:
+                TOUGHNESS_FLAG = True
+                timer_toughness.shutdown()
+                timer_toughness_new = rospy.Timer(
+                    rospy.Duration(20),
+                    complex_networks.calculateToughness,
+                )
         # x = list(range(0, NUM))
         # plt.figure(1)
         # plt.plot(
