@@ -99,15 +99,3 @@ if(Ris.size() == 10)
 	file_Rtotal.print(Rtotal);file_Rtotal.print(" ");
 }
 
-
-// Uav.msgGenerator
-if(randomTrue(main.msgGenerateProb))
-{
-
-	Msg msg = main.add_msgs();
-	MsgSource_target mst = getSourceTarget();
-	msg.sourceID = mst.sourceUav;
-	msg.targetID = mst.targetUav;
-	msg.rootSourceID = msg.sourceID;
-	main.msgCount++;
-}

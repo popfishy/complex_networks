@@ -23,7 +23,7 @@ class UAVNode:
         # self.MaxSenceProbability = 0.9
 
     def all_connect(self, nodes):
-        if not nodes:
+        if len(nodes) == 0:
             pass
         else:
             for node in nodes:
@@ -74,8 +74,10 @@ class UAVNode:
                     break
 
     def wire_node(self, node):
-        node.wired_nodes.append(self.ID)
-        self.wired_nodes.append(node.get_ID())
+        if not self.ID in node.wired_nodes:
+            node.wired_nodes.append(self.ID)
+        if not node.get_ID() in self.wired_nodes:
+            self.wired_nodes.append(node.get_ID())
 
     def get_distance(self, node):
         return np.sqrt(
