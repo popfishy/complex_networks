@@ -83,7 +83,7 @@ include_directories(
 )
 
 add_executable(${PROJECT_NAME}_node
-  src/Node.cpp
+  src/wiremode_test.cpp
 )
 
 # add_executable(${PROJECT_NAME}_node src/control_node.cpp)

@@ -22,10 +22,11 @@ global_node_name = [" "] * NUM
 global_adj_matrix = np.zeros((NUM, NUM), dtype=int)
 sorted_model_states = []
 # raw data: yts_raw一直累计 yts、noise每200s清除一次
-yts_raw = deque(maxlen=10000)
+yts_raw = []
 yts = []
 noises = []
 Ris = []
+msgcnt = 0
 
 FIRST_KILL_FLAG = False
 FIRST_REWIRE_FLAG = False
@@ -245,13 +246,16 @@ class ComplexNetworks:
                     for j in connected_nodes:
                         global_adj_matrix[i, j] = 1
                         global_adj_matrix[j, i] = 1
-
-        # 消息生成
+        # TODO 新增测试
+        self.updateGraph(global_adj_matrix)
 
     def msgGenerator(self, event):
+        global msgcnt
+        msgcnt = msgcnt + 1
         # 消息生成
         for i in range(NUM):
-            if self.getNumberOfAliveUavs() > 0:
+            # ！TODO 此处需要判断该节点是否损毁
+            if (self.getNumberOfAliveUavs() > 0) & (not self.nodes_MY[i].is_damaged):
                 prob = random.random()
                 if prob > (1 - msgGeneratorProb):
                     target_id = random.randint(0, NUM - 1)
@@ -277,7 +281,7 @@ class ComplexNetworks:
                     msg.removeFlag = True
                     msg_to_remove.append(msg)
                 else:
-                    # TODO fix a bug source需要用msg.nowID
+                    # fix a bug source需要用msg.nowID
                     msg.updateNowID()
                     shortest_path = nx.shortest_path(
                         self.graph, source=msg.nowID, target=msg.targetID
@@ -329,7 +333,7 @@ class ComplexNetworks:
 
     # 打击毁伤功能
     def chooseTargeUavAndKill(self, event):
-        # print("kill: ", rospy.Time.now().to_sec())
+        # print("毁伤: ", rospy.Time.now().to_sec())
         global FIRST_KILL_FLAG
         FIRST_KILL_FLAG = True
         # 毁伤打击
@@ -351,7 +355,7 @@ class ComplexNetworks:
 
     # 韧性评估
     def calculateToughness(self, event):
-        # print("calculateToughness: ", rospy.Time.now().to_sec())
+        print("calculateToughness: ", rospy.Time.now().to_sec(), "消息数量为: ", msgcnt)
         global FIRST_TOUGHNESS_FLAG
         FIRST_TOUGHNESS_FLAG = True
         # 计算R_total，数据统计
@@ -363,16 +367,17 @@ class ComplexNetworks:
         sum_ymin = 0
         sum_yR = 0
         R_total = 0
+        # 对第一次的yts长度进行处理
+        yts = yts[-intervalOfRemove:]
+        noises = noises[-intervalOfRemove:]
         for i in range(len(yts)):
             temp = yts[i]
             sum_yt = sum_yt + temp
-            if i < intervalOfRemove * 0.1 * 0.2:
+            if i < intervalOfRemove * 0.2:
                 sum_yD = sum_yD + temp
-            if (i > intervalOfRemove * 0.1 * 0.3) & (i < intervalOfRemove * 0.1 * 0.7):
+            if (i > intervalOfRemove * 0.3) & (i < intervalOfRemove * 0.7):
                 sum_ymin = sum_ymin + temp
-            if (i > intervalOfRemove * 0.1 * 0.73) & (
-                i < intervalOfRemove * 0.1 * 0.98
-            ):
+            if (i > intervalOfRemove * 0.73) & (i < intervalOfRemove * 0.98):
                 sum_yR = sum_yR + temp
             Ps = Ps + temp * temp
             Pn = Pn + noises[i] * noises[i]
@@ -391,6 +396,11 @@ class ComplexNetworks:
             Ri = sigma * rou * (delta + zeta)
         else:
             Ri = sigma * rou * (delta + zeta + 1 - np.power(tau, rou - delta))
+        print("----------------------------------start--------------------------------")
+        print("yts长度: ", len(yts))
+        print("noises长度:", len(noises))
+        print("Ps:", Ps)
+        print("Pn:", Pn)
         print("SNRdB:", SNRdB)
         print("yD:", yD)
         print("ymin:", ymin)
@@ -401,12 +411,14 @@ class ComplexNetworks:
         print("rou:", rou)
         print("zeta:", zeta)
         print("Ri:", Ri)
+        print("----------------------------------end--------------------------------")
 
         Ris.append(Ri)
         with open("../data/Ri.txt", "a") as file:
             file.write(str(Ri) + "\n")
-        yts = []
-        noises = []
+        yts.clear()
+        noises.clear()
+        yts_raw = yts_raw[-intervalOfRemove / 2 :]
 
         if len(Ris) == 5:
             alpha = 0.06
@@ -466,12 +478,16 @@ if __name__ == "__main__":
     rospy.Subscriber(
         "gazebo/model_states", ModelStates, updateGraphCallback, queue_size=1
     )
-    rospy.sleep(rospy.Duration(1))
+    rospy.sleep(rospy.Duration(1.0))
     timer_msg_generator = rospy.Timer(
         rospy.Duration(0.1), complex_networks.msgGenerator
     )
 
-    rospy.sleep(rospy.Duration(3))
+    print("开始产生消息: ", rospy.Time.now().to_sec(), "消息数量为: ", msgcnt)
+
+    rospy.sleep(rospy.Duration(5))
+
+    print("进入毁伤前: ", rospy.Time.now().to_sec(), "消息数量为: ", msgcnt)
     timer_threat = rospy.Timer(
         rospy.Duration(5), complex_networks.chooseTargeUavAndKill
     )
@@ -486,7 +502,7 @@ if __name__ == "__main__":
     rate = rospy.Rate(10)
     fig, ax = plt.subplots()
     while not rospy.is_shutdown():
-        complex_networks.updateGraph(global_adj_matrix)
+        # complex_networks.updateGraph(global_adj_matrix)
         if FIRST_KILL_FLAG == True:
             if KILL_FLAG == False:
                 KILL_FLAG = True
@@ -537,7 +553,7 @@ if __name__ == "__main__":
         # nx.draw(complex_networks.graph, node_size=500, with_labels=True)
         # plt.show()
 
-        complex_networks.visualization(ax)
+        # complex_networks.visualization(ax)
         try:
             rate.sleep()
         except:
