@@ -418,15 +418,15 @@ class ComplexNetworks:
             file.write(str(Ri) + "\n")
         yts.clear()
         noises.clear()
-        yts_raw = yts_raw[-intervalOfRemove / 2 :]
+        yts_raw = yts_raw[-int(intervalOfRemove / 2) :]
 
         if len(Ris) == 5:
             alpha = 0.06
             sum_wi = 0
             for i in range(len(Ris)):
-                sum_wi = sum_wi + np.power(1 - alpha, len(Ris) - i)
+                sum_wi = sum_wi + np.power(1 - alpha, len(Ris) - 1 - i)
             for i in range(len(Ris)):
-                wi = np.power(1 - alpha, len(Ris) - i)
+                wi = np.power(1 - alpha, len(Ris) - 1 - i)
                 R_total = Ris[i] * wi / sum_wi
             print("R_total: ", R_total)
             with open("../data/R_total.txt", "a") as file:
@@ -553,7 +553,7 @@ if __name__ == "__main__":
         # nx.draw(complex_networks.graph, node_size=500, with_labels=True)
         # plt.show()
 
-        # complex_networks.visualization(ax)
+        complex_networks.visualization(ax)
         try:
             rate.sleep()
         except:
