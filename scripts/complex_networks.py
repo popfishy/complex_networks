@@ -5,9 +5,8 @@ from sklearn.preprocessing import normalize
 from sklearn.decomposition import PCA
 import os
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
-from enum import Enum
 import random
-from collections import deque
+from typing import List
 
 from uav import UAVNode
 from globals import *
@@ -26,7 +25,12 @@ yts_raw = []
 yts = []
 noises = []
 Ris = []
-msgcnt = 0
+
+# TODO 对照实验： 1.通信距离rc  2.集群规模N   多次实验 实验次数：times
+times = 1
+file_name = (
+    "_rc:" + str(WireVar.rc) + "_N:" + str(NUM) + "_times:" + str(times) + ".txt"
+)
 
 FIRST_KILL_FLAG = False
 FIRST_REWIRE_FLAG = False
@@ -36,19 +40,15 @@ REWIRE_FLAG = False
 TOUGHNESS_FLAG = False
 
 
-class ThreatMode(Enum):
-    PickUavWithMaxLink = 0
-    PickUavRandom = 1
-
-
 class ComplexNetworks:
     def __init__(self, adj_matrix):
         self.adj_matrix = adj_matrix  # 邻接矩阵
         self.graph = nx.from_numpy_array(adj_matrix)
         self.calculateParam()
         self.is_wired = False
-        self.nodes_MY = []
-        self.threatMode = ThreatMode.PickUavWithMaxLink
+        self.nodes_MY: List[UAVNode] = []
+        self.threat_mode = ThreatMode.PickUavWithMaxLink
+        self.calculate_toughness_mode = calculateToughnessMode.ComplexNetworksMode
 
     def calculateParam(self):
         self.degree = nx.degree(self.graph)  # 度
@@ -192,31 +192,32 @@ class ComplexNetworks:
                 node_MY = UAVNode(i, sorted_model_states[i][1])
                 node_MY.connect(self.nodes_MY)
                 self.nodes_MY.append(node_MY)
-        for i in range(1, NUM):
-            if i == 1:
-                node = self.nodes_MY[i]
-                node.wired_nodes.append(self.nodes_MY[0].ID)
-                self.nodes_MY[0].wired_nodes.append(node.get_ID())
-            else:
-                self.nodes_MY[i].connect(self.nodes_MY)
-        self.is_wired = True
+        # for i in range(1, NUM):
+        #     # TODO 仅当nodes_MY[0]和nodes_MY[1]靠近时，能够直接连接两者所有节点，当不靠近时，需要增加距离判断
+        #     if i == 1:
+        #         pass
+        #         # node = self.nodes_MY[i]
+        #         # node.wired_nodes.append(self.nodes_MY[0].ID)
+        #         # self.nodes_MY[0].wired_nodes.append(node.get_ID())
+        #     else:
+        #         self.nodes_MY[i].connect(self.nodes_MY)
 
         # 重连
         for k in range(10):
             for i in range(1, NUM):
-                if i == 1:
-                    pass
-                else:
-                    self.nodes_MY[i].connect(self.nodes_MY)
-                # TODO
+                # if i == 1:
+                #     pass
+                # else:
+                self.nodes_MY[i].connect(self.nodes_MY)
                 connected_nodes = self.nodes_MY[i].wired_nodes
                 for j in connected_nodes:
                     global_adj_matrix[i, j] = 1
                     global_adj_matrix[j, i] = 1
+        self.is_wired = True
 
         self.updateGraph(global_adj_matrix)
         if DEBUG:
-            print("global_adj_matrix: ", global_adj_matrix)
+            print("wireDistance之后global_adj_matrix: ", global_adj_matrix)
 
     # 动态距离检测
     def disDetection(self):
@@ -242,19 +243,17 @@ class ComplexNetworks:
             if len(self.nodes_MY[i].wired_nodes) == 0:
                 if not self.nodes_MY[i].is_damaged:
                     self.nodes_MY[i].connect(self.nodes_MY)
+                    # self.re_connect(i)
                     connected_nodes = self.nodes_MY[i].wired_nodes
+                    # print("节点:", i, "重新连接的:", connected_nodes)
                     for j in connected_nodes:
                         global_adj_matrix[i, j] = 1
                         global_adj_matrix[j, i] = 1
-        # TODO 新增测试
         self.updateGraph(global_adj_matrix)
 
     def msgGenerator(self, event):
-        global msgcnt
-        msgcnt = msgcnt + 1
         # 消息生成
         for i in range(NUM):
-            # ！TODO 此处需要判断该节点是否损毁
             if (self.getNumberOfAliveUavs() > 0) & (not self.nodes_MY[i].is_damaged):
                 prob = random.random()
                 if prob > (1 - msgGeneratorProb):
@@ -293,7 +292,7 @@ class ComplexNetworks:
         # 计算y(t)并保存数据
         global yts_raw, yts, noises
         yts_raw.append(yt_raw)
-        with open("../data/yts_raw.txt", "a") as file:
+        with open("../data/yts_raw" + file_name, "a") as file:
             file.write(str(yt_raw) + "\n")
         if len(yts_raw) > (2 * M_WINDOW + 1):
             sum = 0
@@ -301,7 +300,7 @@ class ComplexNetworks:
                 sum = sum + yts_raw[len(yts_raw) - i - 1]
             yt = sum / (2 * M_WINDOW + 1)
             yts.append(yt)
-            with open("../data/yts.txt", "a") as file:
+            with open("../data/yts" + file_name, "a") as file:
                 file.write(str(yt) + "\n")
             # 2 * M_WINDOW - 1中点yt_raw值
             noise = yts_raw[len(yts_raw) - M_WINDOW - 1] - yt
@@ -315,47 +314,97 @@ class ComplexNetworks:
         global sorted_model_states, global_adj_matrix
         # global_adj_matrix = np.zeros((NUM, NUM), dtype=int)
         # 重连
-        for i in range(1, NUM):
-            if i == 1:
-                pass
-            else:
-                if not self.nodes_MY[i].is_damaged:
-                    self.nodes_MY[i].connect(self.nodes_MY)
-            connected_nodes = self.nodes_MY[i].wired_nodes
-            for j in connected_nodes:
-                # TODO adj_matrix增加边
-                global_adj_matrix[i, j] = 1
-                global_adj_matrix[j, i] = 1
+        sum = 0
+        for i in range(0, NUM):
+            sum = sum + self.nodes_MY[i].is_damaged
+            if self.nodes_MY[i].is_damaged == False:
+                self.nodes_MY[i].connect(self.nodes_MY)
+                # print("节点:", i, "需要重新连接的:", self.nodes_MY[i].wired_nodes)
+                for j in self.nodes_MY[i].wired_nodes:
+                    global_adj_matrix[i, j] = 1
+                    global_adj_matrix[j, i] = 1
+        print("损毁节点数量: ", sum)
         if DEBUG:
-            print("global_adj_matrix: ", global_adj_matrix)
-        # TODO
+            print("rewire之后global_adj_matrix: ", global_adj_matrix)
         self.updateGraph(global_adj_matrix)
+
+    def re_connect(self, i):
+        for j in range(0, NUM):
+            if self.nodes_MY[j].is_damaged == False:
+                rc = WireVar.rc
+                e = WireVar.e
+                alpha = WireVar.alpha
+                sum_k = 0.0
+                if (
+                    self.nodes_MY[i].ID != self.nodes_MY[j].ID
+                    and self.nodes_MY[i].ID not in self.nodes_MY[j].wired_nodes
+                    and self.nodes_MY[i].get_distance(self.nodes_MY[j]) < rc
+                ):
+                    d = self.nodes_MY[i].get_distance(self.nodes_MY[j])
+                    if d < alpha * rc:
+                        sum_k += len(self.nodes_MY[j].wired_nodes) + e
+                    else:
+                        sum_k += (
+                            (len(self.nodes_MY[j].wired_nodes) + e)
+                            * (rc - d)
+                            / (rc - alpha * rc)
+                        )
+                if sum_k == 0.0:
+                    pass
+                else:
+                    chose = random.uniform(0, sum_k)
+                    count = 0.0
+                    if (
+                        self.nodes_MY[i].ID != self.nodes_MY[j].ID
+                        and self.nodes_MY[i].ID not in self.nodes_MY[j].wired_nodes
+                        and self.nodes_MY[i].get_distance(self.nodes_MY[j]) < rc
+                    ):
+                        d = self.nodes_MY[i].get_distance(self.nodes_MY[j])
+                        if d < alpha * rc:
+                            count += len(self.nodes_MY[j].wired_nodes) + e
+                        else:
+                            count += (
+                                (len(self.nodes_MY[j].wired_nodes) + e)
+                                * (rc - d)
+                                / (rc - alpha * rc)
+                            )
+                    if count > chose:
+                        if (not self.nodes_MY[i].is_damaged) and (
+                            not self.nodes_MY[j].is_damaged
+                        ):
+                            if not self.nodes_MY[i].ID in self.nodes_MY[j].wired_nodes:
+                                self.nodes_MY[j].wired_nodes.append(self.nodes_MY[i].ID)
+                            if not self.nodes_MY[j].ID in self.nodes_MY[i].wired_nodes:
+                                self.nodes_MY[i].wired_nodes.append(self.nodes_MY[j].ID)
 
     # 打击毁伤功能
     def chooseTargeUavAndKill(self, event):
         # print("毁伤: ", rospy.Time.now().to_sec())
+        global global_adj_matrix
         global FIRST_KILL_FLAG
         FIRST_KILL_FLAG = True
         # 毁伤打击
-        if self.threatMode == ThreatMode.PickUavWithMaxLink:
+        if self.threat_mode == ThreatMode.PickUavWithMaxLink:
             max_degree_node = max(self.graph.degree, key=lambda x: x[1])[0]
-            # print("节点： ", max_degree_node)
+            print("选择打击节点： ", max_degree_node)
             self.nodes_MY[max_degree_node].is_damaged = True
             self.nodes_MY[max_degree_node].wired_nodes = []
             for i in range(NUM):
-                self.adj_matrix[max_degree_node][i] = 0
-                self.adj_matrix[i][max_degree_node] = 0
+                global_adj_matrix[max_degree_node][i] = 0
+                global_adj_matrix[i][max_degree_node] = 0
+                if max_degree_node in self.nodes_MY[i].wired_nodes:
+                    self.nodes_MY[i].wired_nodes.remove(max_degree_node)
         else:
             random_node = random.randint(0, NUM - 1)
             self.nodes_MY[random_node].is_damaged = True
             self.nodes_MY[random_node].wired_nodes = []
             for i in range(NUM):
-                self.adj_matrix[random_node][i] = 0
-                self.adj_matrix[i][random_node] = 0
+                global_adj_matrix[random_node][i] = 0
+                global_adj_matrix[i][random_node] = 0
+        self.updateGraph(global_adj_matrix)
 
     # 韧性评估
     def calculateToughness(self, event):
-        print("calculateToughness: ", rospy.Time.now().to_sec(), "消息数量为: ", msgcnt)
         global FIRST_TOUGHNESS_FLAG
         FIRST_TOUGHNESS_FLAG = True
         # 计算R_total，数据统计
@@ -370,7 +419,7 @@ class ComplexNetworks:
         # 对第一次的yts长度进行处理
         yts = yts[-intervalOfRemove:]
         noises = noises[-intervalOfRemove:]
-        for i in range(len(yts)):
+        for i in range(min(len(yts), len(noises))):
             temp = yts[i]
             sum_yt = sum_yt + temp
             if i < intervalOfRemove * 0.2:
@@ -383,7 +432,16 @@ class ComplexNetworks:
             Pn = Pn + noises[i] * noises[i]
 
         SNRdB = 10 * np.log10(Ps / Pn)
-        yD = sum_yD / intervalOfRemove / 0.2
+        # 基于复杂网络计算yD
+        if self.calculate_toughness_mode == calculateToughnessMode.ComplexNetworksMode:
+            yD = sum_yD / intervalOfRemove / 0.2
+        # 基于信息交互计算yD
+        elif (
+            self.calculate_toughness_mode
+            == calculateToughnessMode.InformationExchangeMode
+        ):
+            yD = msgGeneratorProb * NUM
+
         ymin = sum_ymin / intervalOfRemove / 0.4
         yR = sum_yR / intervalOfRemove / 0.25
         sigma = sum_yt / yD / len(yts)
@@ -414,7 +472,7 @@ class ComplexNetworks:
         print("----------------------------------end--------------------------------")
 
         Ris.append(Ri)
-        with open("../data/Ri.txt", "a") as file:
+        with open("../data/Ri" + file_name, "a") as file:
             file.write(str(Ri) + "\n")
         yts.clear()
         noises.clear()
@@ -427,9 +485,9 @@ class ComplexNetworks:
                 sum_wi = sum_wi + np.power(1 - alpha, len(Ris) - 1 - i)
             for i in range(len(Ris)):
                 wi = np.power(1 - alpha, len(Ris) - 1 - i)
-                R_total = Ris[i] * wi / sum_wi
+                R_total = R_total + Ris[i] * wi / sum_wi
             print("R_total: ", R_total)
-            with open("../data/R_total.txt", "a") as file:
+            with open("../data/R_total" + file_name, "a") as file:
                 file.write(str(R_total) + "\n")
 
 
@@ -461,17 +519,19 @@ def updateGraphCallback(msg):
 
 if __name__ == "__main__":
     complex_networks = ComplexNetworks(global_adj_matrix)
-    with open("../data/yts_raw.txt", "w") as file:
+    # TODO 对照实验： 1.通信距离rc  2.集群规模N   多次实验 实验次数：times
+    times = 0
+    with open("../data/yts_raw" + file_name, "w") as file:
         pass
-    with open("../data/yts.txt", "w") as file:
+    with open("../data/yts" + file_name, "w") as file:
         pass
-    with open("../data/Ri.txt", "w") as file:
+    with open("../data/Ri" + file_name, "w") as file:
         pass
-    with open("../data/R_total.txt", "w") as file:
+    with open("../data/R_total" + file_name, "w") as file:
         pass
-    with open("../data/average_steps.txt", "w") as file:
+    with open("../data/average_steps" + file_name, "w") as file:
         pass
-    with open("../data/max_steps.txt", "w") as file:
+    with open("../data/max_steps" + file_name, "w") as file:
         pass
 
     rospy.init_node("pose_subscriber")
@@ -483,11 +543,8 @@ if __name__ == "__main__":
         rospy.Duration(0.1), complex_networks.msgGenerator
     )
 
-    print("开始产生消息: ", rospy.Time.now().to_sec(), "消息数量为: ", msgcnt)
-
     rospy.sleep(rospy.Duration(5))
 
-    print("进入毁伤前: ", rospy.Time.now().to_sec(), "消息数量为: ", msgcnt)
     timer_threat = rospy.Timer(
         rospy.Duration(5), complex_networks.chooseTargeUavAndKill
     )
@@ -558,16 +615,16 @@ if __name__ == "__main__":
             rate.sleep()
         except:
             # 保存数据
-            with open("../data/yts_raw.txt", "a") as file:
+            with open("../data/yts_raw" + file_name, "a") as file:
                 file.close()
-            with open("../data/yts.txt", "a") as file:
+            with open("../data/yts" + file_name, "a") as file:
                 file.close()
-            with open("../data/Ri.txt", "a") as file:
+            with open("../data/Ri" + file_name, "a") as file:
                 file.close()
-            with open("../data/R_total.txt", "a") as file:
+            with open("../data/R_total" + file_name, "a") as file:
                 file.close()
-            with open("../data/average_steps.txt", "a") as file:
+            with open("../data/average_steps" + file_name, "a") as file:
                 file.close()
-            with open("../data/max_steps.txt", "a") as file:
+            with open("../data/max_steps" + file_name, "a") as file:
                 file.close()
             continue
