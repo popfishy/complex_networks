@@ -17,6 +17,7 @@ from control.msg import Toughness
 import rospy
 from gazebo_msgs.msg import ModelStates
 from geometry_msgs.msg import Pose, Twist
+import threading
 
 # global variable
 DEBUG = False
@@ -47,6 +48,7 @@ TOUGHNESS_FLAG = False
 
 class ComplexNetworks:
     def __init__(self, adj_matrix):
+        self.graph_lock = threading.Lock()
         self.adj_matrix = adj_matrix  # 邻接矩阵
         self.graph = nx.from_numpy_array(adj_matrix)
         self.calculateParam()
@@ -71,14 +73,16 @@ class ComplexNetworks:
         self.topsis_weights = self.calculateTopsis()
 
     def updateGraph(self, new_adj_matrix):
-        self.adj_matrix = new_adj_matrix
-        self.graph = nx.from_numpy_array(new_adj_matrix)
+        # 先获取互斥锁
+        with self.graph_lock:
+            self.adj_matrix = new_adj_matrix
+            self.graph = nx.from_numpy_array(new_adj_matrix)
+            self.calculateParam()
         # TODO 更新nodes_MY中wired_nodes的损毁的边  已经在chooseTargeUavAndKill函数中添加
         # for i in range(NUM):
         #     if self.nodes_MY[i].is_damaged:
         #         for j in range(NUM):
         #             self.nodes_MY[j].wired_nodes.remove(i)
-        self.calculateParam()
 
     def update_graph_by_json(self, json_data):
         # 通过json数据更新图
@@ -119,62 +123,6 @@ class ComplexNetworks:
         x = list(range(max(self.degree.values()) + 1))
         y = [i / len(self.graph.nodes) for i in nx.degree_histogram(self.graph)]
         return x, y
-
-    def visualization(self, ax):
-        # 更新边
-        lines = ax.lines  # 获取当前图形中的所有线条对象
-        for line in lines:
-            line.remove()  # 删除所有线条对象
-        # Compute node positions on the circle
-        num_nodes = self.adj_matrix.shape[0]
-        angle = 2 * np.pi / num_nodes
-        radius = 0.4  # 圆的半径
-        node_positions = [
-            (0.5 + radius * np.cos(i * angle), 0.5 + radius * np.sin(i * angle))
-            for i in range(num_nodes)
-        ]
-
-        # Plot edges based on the adjacency matrix
-        for i in range(num_nodes):
-            for j in range(i + 1, num_nodes):
-                if self.adj_matrix[i][j] == 1:
-                    plt.plot(
-                        [node_positions[i][0], node_positions[j][0]],
-                        [node_positions[i][1], node_positions[j][1]],
-                        "black",
-                    )
-        for i in range(num_nodes):
-            image = plt.imread(
-                os.path.join(
-                    os.path.dirname(os.path.abspath(__file__)), "pic/plane.png"
-                )
-            )
-            imagebox = OffsetImage(image, zoom=0.1)
-            ab = AnnotationBbox(imagebox, node_positions[i], frameon=False)
-            ax.add_artist(ab)
-            # 添加节点名称的文本标签
-            text_radius = radius + 0.03  # 节点名称的半径
-            text_angle = i * angle  # 节点名称的角度
-            text_x = 0.5 + text_radius * np.cos(text_angle)  # 节点名称的x坐标
-            text_y = 0.5 + text_radius * np.sin(text_angle)  # 节点名称的y坐标
-            ax.annotate(
-                global_node_name[i],
-                xy=(text_x, text_y),
-                xytext=(0, 0),  # 文本标签的偏移量
-                textcoords="offset points",
-                ha="center",
-                va="center",
-                fontsize=12,
-            )
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
-        ax.set_aspect("equal", adjustable="box")
-        ax.axis("off")
-        x = [node_positions[i][0] for i in range(num_nodes)]
-        y = [node_positions[i][1] for i in range(num_nodes)]
-        plt.plot(x, y, "ro")
-        plt.draw()
-        plt.pause(0.001)
 
     def getNumberOfAliveUavs(self):
         alive_uav_number = 0
@@ -269,13 +217,29 @@ class ComplexNetworks:
                     target_id = random.randint(0, NUM - 1)
                     while i == target_id:
                         target_id = random.randint(0, NUM - 1)
-                    if self.adj_matrix[i][target_id] != 0:
+                    # 线程锁，防止冲突
+                    with self.graph_lock:
+                        temp_graph = self.graph
+                    # if nx.has_path(temp_graph, i, target_id):
+                    #     shortest_path = nx.shortest_path(
+                    #         temp_graph, source=i, target=target_id
+                    #     )
+                    #     uav_msg = UAVMsg(shortest_path)
+                    #     self.nodes_MY[i].msgs.append(uav_msg)
+                    # else:
+                    #     uav_msg = UAVMsg()
+                    #     uav_msg.soureID = i
+                    #     uav_msg.nowID = i
+                    #     uav_msg.targetID = -1
+                    #     uav_msg.shortPath = [uav_msg.soureID, uav_msg.targetID]
+                    #     self.nodes_MY[i].msgs.append(uav_msg)
+                    try:
                         shortest_path = nx.shortest_path(
-                            self.graph, source=i, target=target_id
+                            temp_graph, source=i, target=target_id
                         )
                         uav_msg = UAVMsg(shortest_path)
                         self.nodes_MY[i].msgs.append(uav_msg)
-                    else:
+                    except nx.NetworkXNoPath:
                         uav_msg = UAVMsg()
                         uav_msg.soureID = i
                         uav_msg.nowID = i
@@ -283,7 +247,7 @@ class ComplexNetworks:
                         uav_msg.shortPath = [uav_msg.soureID, uav_msg.targetID]
                         self.nodes_MY[i].msgs.append(uav_msg)
 
-        global yts_raw, yts, noises, start_time, clear_msgs
+        global yts_raw, yts, noises, start_time, clear_msgs, global_adj_matrix
         yt_raw = 0
         yt = 0
 
@@ -302,10 +266,15 @@ class ComplexNetworks:
                 else:
                     # fix a bug source需要用msg.nowID
                     msg.updateNowID()
-                    shortest_path = nx.shortest_path(
-                        self.graph, source=msg.nowID, target=msg.targetID
-                    )
-                    msg.updateShortPath(shortest_path)
+                    try:
+                        shortest_path = nx.shortest_path(
+                            self.graph, source=msg.nowID, target=msg.targetID
+                        )
+                        msg.updateShortPath(shortest_path)
+                    except nx.NetworkXNoPath:
+                        msg.removeFlag = True
+                        msg_to_remove.append(msg)
+
             for msg_remove in msg_to_remove:
                 self.nodes_MY[i].msgs.remove(msg_remove)
 
@@ -329,8 +298,8 @@ class ComplexNetworks:
         global start_time
         msg_generator_time = rospy.Time.now().to_sec()
         toughness_msg = Toughness()
-        toughness_msg.matrix = np.ravel(self.adj_matrix)
-        toughness_msg.rows, toughness_msg.cols = self.adj_matrix.shape
+        toughness_msg.matrix = np.ravel(global_adj_matrix)
+        toughness_msg.rows, toughness_msg.cols = global_adj_matrix.shape
         toughness_msg.time = msg_generator_time - start_time
         toughness_msg.yt = yt
         toughness_msg.yt_raw = yt_raw
@@ -346,16 +315,11 @@ class ComplexNetworks:
         global sorted_model_states, global_adj_matrix
         # global_adj_matrix = np.zeros((NUM, NUM), dtype=int)
         # 重连
-        sum = 0
-        for i in range(0, NUM):
-            sum = sum + self.nodes_MY[i].is_damaged
-            if self.nodes_MY[i].is_damaged == False:
-                self.nodes_MY[i].connect(self.nodes_MY)
-                # print("节点:", i, "需要重新连接的:", self.nodes_MY[i].wired_nodes)
-                for j in self.nodes_MY[i].wired_nodes:
-                    global_adj_matrix[i, j] = 1
-                    global_adj_matrix[j, i] = 1
-        print("损毁节点数量: ", sum)
+        for i in range(NUM):
+            self.nodes_MY[i].connect(self.nodes_MY)
+            for j in self.nodes_MY[i].wired_nodes:
+                global_adj_matrix[i, j] = 1
+                global_adj_matrix[j, i] = 1
         if DEBUG:
             print("rewire之后global_adj_matrix: ", global_adj_matrix)
         self.updateGraph(global_adj_matrix)
@@ -367,12 +331,14 @@ class ComplexNetworks:
         global FIRST_KILL_FLAG
         FIRST_KILL_FLAG = True
         # 毁伤打击
+        sum = 0
         if self.threat_mode == ThreatMode.PickUavWithMaxLink:
             max_degree_node = max(self.graph.degree, key=lambda x: x[1])[0]
             print("选择打击节点： ", max_degree_node)
             self.nodes_MY[max_degree_node].is_damaged = True
             self.nodes_MY[max_degree_node].wired_nodes = []
             for i in range(NUM):
+                sum = sum + self.nodes_MY[i].is_damaged
                 global_adj_matrix[max_degree_node][i] = 0
                 global_adj_matrix[i][max_degree_node] = 0
                 if max_degree_node in self.nodes_MY[i].wired_nodes:
@@ -385,6 +351,7 @@ class ComplexNetworks:
                 global_adj_matrix[random_node][i] = 0
                 global_adj_matrix[i][random_node] = 0
         self.updateGraph(global_adj_matrix)
+        print("打击完成，且损毁节点的数量为: ", sum)
 
     # 韧性评估
     def calculateToughness(self, event):
@@ -414,7 +381,6 @@ class ComplexNetworks:
             Ps = Ps + temp * temp
             Pn = Pn + noises[i] * noises[i]
 
-        SNRdB = 10 * np.log10(Ps / Pn)
         # 基于复杂网络计算yD
         if self.calculate_toughness_mode == calculateToughnessMode.ComplexNetworksMode:
             yD = sum_yD / intervalOfRemove / 0.2
@@ -425,12 +391,13 @@ class ComplexNetworks:
         ):
             yD = msgGeneratorProb * NUM
 
+        SNRdB = 10 * np.log10(Ps / Pn)
         ymin = sum_ymin / intervalOfRemove / 0.4
         yR = sum_yR / intervalOfRemove / 0.25
-        sigma = sum_yt / yD / len(yts)
+        sigma = sum_yt / yD / min(len(yts), len(noises))
         delta = ymin / yD
-        tau = (intervalOfRemove + 4) / 2 / len(yts)
         rou = yR / yD
+        tau = (intervalOfRemove + 4) / 2 / min(len(yts), len(noises))
         zeta = 1 / (1 + np.exp(-0.25 * (SNRdB - 15)))
         Ri = 0
         if rou < delta:
@@ -457,18 +424,19 @@ class ComplexNetworks:
         Ris.append(Ri)
         with open("../data/Ri" + file_name, "a") as file:
             file.write(str(Ri) + "\n")
-        # yts.clear()
-        # noises.clear()
+        yts.clear()
+        noises.clear()
         # yts_raw = yts_raw[-int(intervalOfRemove / 2) :]
 
-        if len(Ris) == 5:
+        if len(Ris) >= 5:
+            Ris_temp = Ris[-5:]
             alpha = 0.06
             sum_wi = 0
-            for i in range(len(Ris)):
-                sum_wi = sum_wi + np.power(1 - alpha, len(Ris) - 1 - i)
-            for i in range(len(Ris)):
-                wi = np.power(1 - alpha, len(Ris) - 1 - i)
-                R_total = R_total + Ris[i] * wi / sum_wi
+            for i in range(len(Ris_temp)):
+                sum_wi = sum_wi + np.power(1 - alpha, len(Ris_temp) - 1 - i)
+            for i in range(len(Ris_temp)):
+                wi = np.power(1 - alpha, len(Ris_temp) - 1 - i)
+                R_total = R_total + Ris_temp[i] * wi / sum_wi
             print("R_total: ", R_total)
             with open("../data/R_total" + file_name, "a") as file:
                 file.write(str(R_total) + "\n")
