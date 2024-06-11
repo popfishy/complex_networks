@@ -28,6 +28,7 @@ yts_raw = []
 yts = []
 noises = []
 Ris = []
+clear_msgs = 0
 start_time = rospy.Time()
 
 # TODO 对照实验： 1.通信距离rc  2.集群规模N   多次实验 实验次数：times
@@ -266,17 +267,23 @@ class ComplexNetworks:
                 prob = random.random()
                 if prob > (1 - msgGeneratorProb):
                     target_id = random.randint(0, NUM - 1)
-                    while self.adj_matrix[i][target_id] == 0:
+                    while i == target_id:
                         target_id = random.randint(0, NUM - 1)
-                    try:
+                    if self.adj_matrix[i][target_id] != 0:
                         shortest_path = nx.shortest_path(
                             self.graph, source=i, target=target_id
                         )
                         uav_msg = UAVMsg(shortest_path)
                         self.nodes_MY[i].msgs.append(uav_msg)
-                    except:
-                        pass
+                    else:
+                        uav_msg = UAVMsg()
+                        uav_msg.soureID = i
+                        uav_msg.nowID = i
+                        uav_msg.targetID = -1
+                        uav_msg.shortPath = [uav_msg.soureID, uav_msg.targetID]
+                        self.nodes_MY[i].msgs.append(uav_msg)
 
+        global yts_raw, yts, noises, start_time, clear_msgs
         yt_raw = 0
         yt = 0
 
@@ -286,6 +293,10 @@ class ComplexNetworks:
             for msg in self.nodes_MY[i].msgs:
                 if msg.nowID == msg.targetID:
                     yt_raw = yt_raw + 1
+                    msg.removeFlag = True
+                    msg_to_remove.append(msg)
+                elif msg.targetID == -1:
+                    clear_msgs = clear_msgs + 1
                     msg.removeFlag = True
                     msg_to_remove.append(msg)
                 else:
@@ -299,7 +310,6 @@ class ComplexNetworks:
                 self.nodes_MY[i].msgs.remove(msg_remove)
 
         # 计算y(t)并保存数据
-        global yts_raw, yts, noises, start_time
         yts_raw.append(yt_raw)
         with open("../data/yts_raw" + file_name, "a") as file:
             file.write(str(yt_raw) + "\n")
@@ -319,9 +329,13 @@ class ComplexNetworks:
         global start_time
         msg_generator_time = rospy.Time.now().to_sec()
         toughness_msg = Toughness()
+        toughness_msg.matrix = np.ravel(self.adj_matrix)
+        toughness_msg.rows, toughness_msg.cols = self.adj_matrix.shape
         toughness_msg.time = msg_generator_time - start_time
         toughness_msg.yt = yt
         toughness_msg.yt_raw = yt_raw
+        toughness_msg.clear_msgs = clear_msgs
+
         pub.publish(toughness_msg)
 
     # 毁伤后节点重连

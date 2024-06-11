@@ -178,6 +178,7 @@ Temporary Items
 scripts/__pycache__*
 
 *.pdf
+*.txt
 
 
 

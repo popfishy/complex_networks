@@ -60,8 +60,6 @@ class RealTimePlot(QWidget):
         self.average_length_of_msgs = []
         self.clear_msgs = []
         self.time = []
-        self.data2 = []
-        self.data3 = []
         self.matrix = np.zeros((NUM, NUM), dtype=int)
 
         # Create plot widgets
@@ -81,14 +79,16 @@ class RealTimePlot(QWidget):
     @pyqtSlot(Toughness)
     def update(self, msg):
         # Update data
+        self.matrix = np.array(msg.matrix).reshape(msg.rows, msg.cols)
         self.time.append(msg.time)
-        self.data2.append(msg.yt_raw)
-        self.data3.append(msg.yt)
+        self.clear_msgs.append(msg.clear_msgs)
+        self.yts_raw.append(msg.yt_raw)
+        self.yts.append(msg.yt)
 
         # Update plots
-        self.plot_num_of_msgs.plot(self.time, self.yts, clear=True)
-        self.plot_length_of_msgs.plot(self.time, self.data2, clear=True)
-        self.plot_clear_msgs.plot(self.time, self.data3, clear=True)
+        self.plot_num_of_msgs.plot(self.time, self.clear_msgs, clear=True)
+        self.plot_length_of_msgs.plot(self.time, self.yts_raw, clear=True)
+        self.plot_clear_msgs.plot(self.time, self.yts, clear=True)
 
     def update_plot(self, frame):
         self.canvas.ax.clear()
@@ -128,13 +128,15 @@ class RealTimePlot(QWidget):
 
             # 添加节点名称的文本
             self.canvas.ax.text(
-                node_positions[i][0],
-                node_positions[i][1] + 0.05,
-                f"Node {i}",
+                node_positions[i][0] + 0.03 * np.cos(angle * i),
+                node_positions[i][1] + 0.03 * np.sin(angle * i),
+                f"uav {i}",
                 ha="center",
                 va="center",
-                fontsize=12,
+                fontsize=10,
             )
+
+        self.canvas.ax.set_axis_off()  # 关闭坐标轴显示
 
 
 if __name__ == "__main__":

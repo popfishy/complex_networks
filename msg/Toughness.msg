@@ -1,6 +1,9 @@
+uint16[] matrix
+uint16 rows
+uint16 cols
+float32 time
 float32 yt
 float32 yt_raw
 float32 max_length_of_msgs
 float32 average_length_of_msgs
 float32 clear_msgs
-float32 time
