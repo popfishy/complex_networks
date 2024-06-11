@@ -5,12 +5,15 @@ from sklearn.preprocessing import normalize
 from sklearn.decomposition import PCA
 import os
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+from PyQt5.QtWidgets import QApplication
+import sys
 import random
 from typing import List
 
 from uav import UAVNode
 from globals import *
 from uav_msg import UAVMsg
+from control.msg import Toughness
 import rospy
 from gazebo_msgs.msg import ModelStates
 from geometry_msgs.msg import Pose, Twist
@@ -25,6 +28,7 @@ yts_raw = []
 yts = []
 noises = []
 Ris = []
+start_time = rospy.Time()
 
 # TODO 对照实验： 1.通信距离rc  2.集群规模N   多次实验 实验次数：times
 times = 1
@@ -68,6 +72,11 @@ class ComplexNetworks:
     def updateGraph(self, new_adj_matrix):
         self.adj_matrix = new_adj_matrix
         self.graph = nx.from_numpy_array(new_adj_matrix)
+        # TODO 更新nodes_MY中wired_nodes的损毁的边  已经在chooseTargeUavAndKill函数中添加
+        # for i in range(NUM):
+        #     if self.nodes_MY[i].is_damaged:
+        #         for j in range(NUM):
+        #             self.nodes_MY[j].wired_nodes.remove(i)
         self.calculateParam()
 
     def update_graph_by_json(self, json_data):
@@ -243,7 +252,6 @@ class ComplexNetworks:
             if len(self.nodes_MY[i].wired_nodes) == 0:
                 if not self.nodes_MY[i].is_damaged:
                     self.nodes_MY[i].connect(self.nodes_MY)
-                    # self.re_connect(i)
                     connected_nodes = self.nodes_MY[i].wired_nodes
                     # print("节点:", i, "重新连接的:", connected_nodes)
                     for j in connected_nodes:
@@ -269,8 +277,9 @@ class ComplexNetworks:
                     except:
                         pass
 
-        # 消息的传递
         yt_raw = 0
+        yt = 0
+
         # TODO 增加消息传递step数据
         for i in range(NUM):
             msg_to_remove = []
@@ -290,7 +299,7 @@ class ComplexNetworks:
                 self.nodes_MY[i].msgs.remove(msg_remove)
 
         # 计算y(t)并保存数据
-        global yts_raw, yts, noises
+        global yts_raw, yts, noises, start_time
         yts_raw.append(yt_raw)
         with open("../data/yts_raw" + file_name, "a") as file:
             file.write(str(yt_raw) + "\n")
@@ -305,6 +314,15 @@ class ComplexNetworks:
             # 2 * M_WINDOW - 1中点yt_raw值
             noise = yts_raw[len(yts_raw) - M_WINDOW - 1] - yt
             noises.append(noise)
+
+        # for visualization
+        global start_time
+        msg_generator_time = rospy.Time.now().to_sec()
+        toughness_msg = Toughness()
+        toughness_msg.time = msg_generator_time - start_time
+        toughness_msg.yt = yt
+        toughness_msg.yt_raw = yt_raw
+        pub.publish(toughness_msg)
 
     # 毁伤后节点重连
     def rewire(self, event):
@@ -327,55 +345,6 @@ class ComplexNetworks:
         if DEBUG:
             print("rewire之后global_adj_matrix: ", global_adj_matrix)
         self.updateGraph(global_adj_matrix)
-
-    def re_connect(self, i):
-        for j in range(0, NUM):
-            if self.nodes_MY[j].is_damaged == False:
-                rc = WireVar.rc
-                e = WireVar.e
-                alpha = WireVar.alpha
-                sum_k = 0.0
-                if (
-                    self.nodes_MY[i].ID != self.nodes_MY[j].ID
-                    and self.nodes_MY[i].ID not in self.nodes_MY[j].wired_nodes
-                    and self.nodes_MY[i].get_distance(self.nodes_MY[j]) < rc
-                ):
-                    d = self.nodes_MY[i].get_distance(self.nodes_MY[j])
-                    if d < alpha * rc:
-                        sum_k += len(self.nodes_MY[j].wired_nodes) + e
-                    else:
-                        sum_k += (
-                            (len(self.nodes_MY[j].wired_nodes) + e)
-                            * (rc - d)
-                            / (rc - alpha * rc)
-                        )
-                if sum_k == 0.0:
-                    pass
-                else:
-                    chose = random.uniform(0, sum_k)
-                    count = 0.0
-                    if (
-                        self.nodes_MY[i].ID != self.nodes_MY[j].ID
-                        and self.nodes_MY[i].ID not in self.nodes_MY[j].wired_nodes
-                        and self.nodes_MY[i].get_distance(self.nodes_MY[j]) < rc
-                    ):
-                        d = self.nodes_MY[i].get_distance(self.nodes_MY[j])
-                        if d < alpha * rc:
-                            count += len(self.nodes_MY[j].wired_nodes) + e
-                        else:
-                            count += (
-                                (len(self.nodes_MY[j].wired_nodes) + e)
-                                * (rc - d)
-                                / (rc - alpha * rc)
-                            )
-                    if count > chose:
-                        if (not self.nodes_MY[i].is_damaged) and (
-                            not self.nodes_MY[j].is_damaged
-                        ):
-                            if not self.nodes_MY[i].ID in self.nodes_MY[j].wired_nodes:
-                                self.nodes_MY[j].wired_nodes.append(self.nodes_MY[i].ID)
-                            if not self.nodes_MY[j].ID in self.nodes_MY[i].wired_nodes:
-                                self.nodes_MY[i].wired_nodes.append(self.nodes_MY[j].ID)
 
     # 打击毁伤功能
     def chooseTargeUavAndKill(self, event):
@@ -474,9 +443,9 @@ class ComplexNetworks:
         Ris.append(Ri)
         with open("../data/Ri" + file_name, "a") as file:
             file.write(str(Ri) + "\n")
-        yts.clear()
-        noises.clear()
-        yts_raw = yts_raw[-int(intervalOfRemove / 2) :]
+        # yts.clear()
+        # noises.clear()
+        # yts_raw = yts_raw[-int(intervalOfRemove / 2) :]
 
         if len(Ris) == 5:
             alpha = 0.06
@@ -534,11 +503,14 @@ if __name__ == "__main__":
     with open("../data/max_steps" + file_name, "w") as file:
         pass
 
-    rospy.init_node("pose_subscriber")
+    rospy.init_node("complex_networks")
     rospy.Subscriber(
         "gazebo/model_states", ModelStates, updateGraphCallback, queue_size=1
     )
+    pub = rospy.Publisher("ui/toughness", Toughness, queue_size=1)
+
     rospy.sleep(rospy.Duration(1.0))
+    start_time = rospy.Time.now().to_sec()
     timer_msg_generator = rospy.Timer(
         rospy.Duration(0.1), complex_networks.msgGenerator
     )
@@ -557,7 +529,7 @@ if __name__ == "__main__":
     )
 
     rate = rospy.Rate(10)
-    fig, ax = plt.subplots()
+
     while not rospy.is_shutdown():
         # complex_networks.updateGraph(global_adj_matrix)
         if FIRST_KILL_FLAG == True:
@@ -610,7 +582,6 @@ if __name__ == "__main__":
         # nx.draw(complex_networks.graph, node_size=500, with_labels=True)
         # plt.show()
 
-        complex_networks.visualization(ax)
         try:
             rate.sleep()
         except:
@@ -627,4 +598,3 @@ if __name__ == "__main__":
                 file.close()
             with open("../data/max_steps" + file_name, "a") as file:
                 file.close()
-            continue

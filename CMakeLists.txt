@@ -10,6 +10,7 @@ find_package(catkin REQUIRED COMPONENTS
   rosmsg
   rospy
   std_msgs
+  message_generation
 )
 
 find_package(OpenCV 4 REQUIRED)
@@ -22,11 +23,10 @@ find_package(OpenCV 4 REQUIRED)
 ################################################
 
 ## Generate messages in the 'msg' folder
-# add_message_files(
-#   FILES
-#   Message1.msg
-#   Message2.msg
-# )
+add_message_files(
+  FILES
+  Toughness.msg
+)
 
 ## Generate services in the 'srv' folder
 # add_service_files(
@@ -43,10 +43,10 @@ find_package(OpenCV 4 REQUIRED)
 # )
 
 ## Generate added messages and services with any dependencies listed here
-# generate_messages(
-#   DEPENDENCIES
-#   geometry_msgs#   std_msgs
-# )
+generate_messages(
+  DEPENDENCIES
+  std_msgs
+)
 
 ################################################
 ## Declare ROS dynamic reconfigure parameters ##
@@ -66,7 +66,7 @@ find_package(OpenCV 4 REQUIRED)
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES control
-#  CATKIN_DEPENDS geometry_msgs roscpp rosmsg rospy std_msgs
+ CATKIN_DEPENDS geometry_msgs roscpp rosmsg rospy std_msgs message_runtime
 #  DEPENDS system_lib
 )
 
