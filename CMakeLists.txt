@@ -26,6 +26,7 @@ find_package(OpenCV 4 REQUIRED)
 add_message_files(
   FILES
   Toughness.msg
+  Result.msg
 )
 
 ## Generate services in the 'srv' folder

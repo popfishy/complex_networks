@@ -42,21 +42,25 @@ def pose_publisher(mode):
         cnt = len(points_list)
     elif mode == "random":
         center_list = [
-            np.array([-24, 0]),
-            np.array([-12, 0]),
+            np.array([-30, 0]),
+            np.array([-15, 0]),
             np.array([0, 0]),
-            np.array([-24, 0]),
-            np.array([-12, 0]),
+            np.array([15, 0]),
+            np.array([30, 0]),
+            np.array([-30, 0]),
+            np.array([-15, 0]),
             np.array([0, 0]),
+            np.array([15, 0]),
+            np.array([30, 0]),
         ]
         points_list = []
-        circle_list = [draw.draw_circle(center, 4, 6) for center in center_list]
+        circle_list = [draw.draw_circle(center, 6, 10) for center in center_list]
         for i in range(row_num):
             random_points = draw.get_random_points(n=5, scale=4)
             points = draw.get_bezier_curve(random_points, rad=0.2, edgy=0.05)
             points_list.append(points)
         cnt = min([len(points) for points in points_list])
-        z_list = [3, 3, 3, 6, 6, 6]
+        z_list = [3, 3, 3, 3, 3, 6, 6, 6, 6, 6]
     rate = rospy.Rate(30)
     while not rospy.is_shutdown():
         if mode == "circle":

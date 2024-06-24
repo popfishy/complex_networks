@@ -7,3 +7,5 @@ float32 yt_raw
 float32 max_length_of_msgs
 float32 average_length_of_msgs
 float32 clear_msgs
+float32[] R
+float32 R_total

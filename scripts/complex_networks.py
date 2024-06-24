@@ -1,12 +1,7 @@
 import networkx as nx
 import numpy as np
-import matplotlib.pyplot as plt
 from sklearn.preprocessing import normalize
 from sklearn.decomposition import PCA
-import os
-from matplotlib.offsetbox import OffsetImage, AnnotationBbox
-from PyQt5.QtWidgets import QApplication
-import sys
 import random
 from typing import List
 
@@ -14,6 +9,7 @@ from uav import UAVNode
 from globals import *
 from uav_msg import UAVMsg
 from control.msg import Toughness
+from control.msg import Result
 import rospy
 from gazebo_msgs.msg import ModelStates
 from geometry_msgs.msg import Pose, Twist
@@ -73,11 +69,15 @@ class ComplexNetworks:
         self.topsis_weights = self.calculateTopsis()
 
     def updateGraph(self, new_adj_matrix):
+        new_adj_matrix_copy = new_adj_matrix.copy()
         # 先获取互斥锁
         with self.graph_lock:
-            self.adj_matrix = new_adj_matrix
-            self.graph = nx.from_numpy_array(new_adj_matrix)
-            self.calculateParam()
+            try:
+                self.adj_matrix = new_adj_matrix_copy
+                self.graph = nx.from_numpy_array(new_adj_matrix_copy)
+                self.calculateParam()
+            except RuntimeError as e:
+                rospy.logerr(f"RuntimeError in updateGraph: {e}")
         # TODO 更新nodes_MY中wired_nodes的损毁的边  已经在chooseTargeUavAndKill函数中添加
         # for i in range(NUM):
         #     if self.nodes_MY[i].is_damaged:
@@ -220,19 +220,6 @@ class ComplexNetworks:
                     # 线程锁，防止冲突
                     with self.graph_lock:
                         temp_graph = self.graph
-                    # if nx.has_path(temp_graph, i, target_id):
-                    #     shortest_path = nx.shortest_path(
-                    #         temp_graph, source=i, target=target_id
-                    #     )
-                    #     uav_msg = UAVMsg(shortest_path)
-                    #     self.nodes_MY[i].msgs.append(uav_msg)
-                    # else:
-                    #     uav_msg = UAVMsg()
-                    #     uav_msg.soureID = i
-                    #     uav_msg.nowID = i
-                    #     uav_msg.targetID = -1
-                    #     uav_msg.shortPath = [uav_msg.soureID, uav_msg.targetID]
-                    #     self.nodes_MY[i].msgs.append(uav_msg)
                     try:
                         shortest_path = nx.shortest_path(
                             temp_graph, source=i, target=target_id
@@ -305,7 +292,7 @@ class ComplexNetworks:
         toughness_msg.yt_raw = yt_raw
         toughness_msg.clear_msgs = clear_msgs
 
-        pub.publish(toughness_msg)
+        pub_toughness.publish(toughness_msg)
 
     # 毁伤后节点重连
     def rewire(self, event):
@@ -331,18 +318,22 @@ class ComplexNetworks:
         global FIRST_KILL_FLAG
         FIRST_KILL_FLAG = True
         # 毁伤打击
-        sum = 0
         if self.threat_mode == ThreatMode.PickUavWithMaxLink:
-            max_degree_node = max(self.graph.degree, key=lambda x: x[1])[0]
-            print("选择打击节点： ", max_degree_node)
-            self.nodes_MY[max_degree_node].is_damaged = True
-            self.nodes_MY[max_degree_node].wired_nodes = []
-            for i in range(NUM):
-                sum = sum + self.nodes_MY[i].is_damaged
-                global_adj_matrix[max_degree_node][i] = 0
-                global_adj_matrix[i][max_degree_node] = 0
-                if max_degree_node in self.nodes_MY[i].wired_nodes:
-                    self.nodes_MY[i].wired_nodes.remove(max_degree_node)
+            # self.degree每个元素为[节点, 度]
+            max_degree_node_list = sorted(
+                self.degree, key=lambda x: x[1], reverse=True
+            )[0:2]
+            print("选择打击节点： ", max_degree_node_list)
+            for max_degree_node in max_degree_node_list:
+                max_degree_node = max_degree_node[0]
+                print("max_degree_node", max_degree_node)
+                self.nodes_MY[max_degree_node].is_damaged = True
+                self.nodes_MY[max_degree_node].wired_nodes = []
+                for i in range(NUM):
+                    global_adj_matrix[max_degree_node][i] = 0
+                    global_adj_matrix[i][max_degree_node] = 0
+                    if max_degree_node in self.nodes_MY[i].wired_nodes:
+                        self.nodes_MY[i].wired_nodes.remove(max_degree_node)
         else:
             random_node = random.randint(0, NUM - 1)
             self.nodes_MY[random_node].is_damaged = True
@@ -351,7 +342,8 @@ class ComplexNetworks:
                 global_adj_matrix[random_node][i] = 0
                 global_adj_matrix[i][random_node] = 0
         self.updateGraph(global_adj_matrix)
-        print("打击完成，且损毁节点的数量为: ", sum)
+        sum_damaged = sum(node.is_damaged for node in self.nodes_MY)
+        print("打击完成，且损毁节点的数量为: ", sum_damaged)
 
     # 韧性评估
     def calculateToughness(self, event):
@@ -372,7 +364,7 @@ class ComplexNetworks:
         for i in range(min(len(yts), len(noises))):
             temp = yts[i]
             sum_yt = sum_yt + temp
-            if i < intervalOfRemove * 0.2:
+            if i < intervalOfRemove * 0.28:
                 sum_yD = sum_yD + temp
             if (i > intervalOfRemove * 0.3) & (i < intervalOfRemove * 0.7):
                 sum_ymin = sum_ymin + temp
@@ -397,27 +389,25 @@ class ComplexNetworks:
         sigma = sum_yt / yD / min(len(yts), len(noises))
         delta = ymin / yD
         rou = yR / yD
-        tau = (intervalOfRemove + 4) / 2 / min(len(yts), len(noises))
+        # tau = (t_ss-t_0)/(t_final-t_0)
+        tau = (intervalOfRemove + 40) / 2 / min(len(yts), len(noises))
         zeta = 1 / (1 + np.exp(-0.25 * (SNRdB - 15)))
         Ri = 0
+        R_total = 0
         if rou < delta:
             Ri = sigma * rou * (delta + zeta)
         else:
             Ri = sigma * rou * (delta + zeta + 1 - np.power(tau, rou - delta))
         print("----------------------------------start--------------------------------")
         print("yts长度: ", len(yts))
-        print("noises长度:", len(noises))
-        print("Ps:", Ps)
-        print("Pn:", Pn)
         print("SNRdB:", SNRdB)
         print("yD:", yD)
         print("ymin:", ymin)
         print("yR:", yR)
-        print("sigma:", sigma)
-        print("delta:", delta)
         print("tau:", tau)
-        print("rou:", rou)
         print("zeta:", zeta)
+        print("rou-delta:", rou - delta)
+        print("误差对数", 1 - np.power(tau, rou - delta))
         print("Ri:", Ri)
         print("----------------------------------end--------------------------------")
 
@@ -428,8 +418,8 @@ class ComplexNetworks:
         noises.clear()
         # yts_raw = yts_raw[-int(intervalOfRemove / 2) :]
 
-        if len(Ris) >= 5:
-            Ris_temp = Ris[-5:]
+        if len(Ris) >= 10:
+            Ris_temp = Ris[-10:]
             alpha = 0.06
             sum_wi = 0
             for i in range(len(Ris_temp)):
@@ -440,6 +430,11 @@ class ComplexNetworks:
             print("R_total: ", R_total)
             with open("../data/R_total" + file_name, "a") as file:
                 file.write(str(R_total) + "\n")
+
+        result_msg = Result()
+        result_msg.R = Ris
+        result_msg.R_total = R_total
+        pub_result.publish(result_msg)
 
 
 def calculateDistance(pose1, pose2):
@@ -489,7 +484,8 @@ if __name__ == "__main__":
     rospy.Subscriber(
         "gazebo/model_states", ModelStates, updateGraphCallback, queue_size=1
     )
-    pub = rospy.Publisher("ui/toughness", Toughness, queue_size=1)
+    pub_toughness = rospy.Publisher("ui/toughness", Toughness, queue_size=1)
+    pub_result = rospy.Publisher("ui/result", Result, queue_size=1)
 
     rospy.sleep(rospy.Duration(1.0))
     start_time = rospy.Time.now().to_sec()

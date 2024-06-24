@@ -2,7 +2,7 @@ from enum import Enum
 
 # variables
 # 无人机集群规模
-NUM = 36
+NUM = 100
 # 无人机个体每秒产生消息的概率
 msgGeneratorProb = 0.5
 # 毁伤——自适应恢复事件的周期
