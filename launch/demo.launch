@@ -1,0 +1,58 @@
+<launch>
+    <!-- 设置全局参数 -->
+    <param name="robot_description" textfile="$(find my_robot_package)/urdf/robot.urdf" />
+
+    <!-- 启动节点 -->
+    <node name="talker" pkg="rospy_tutorials" type="talker" output="screen" respawn="true">
+        <!-- 设置节点专属参数 -->
+        <param name="param_name" value="param_value" />
+    </node>
+
+    <!-- 启动另一个节点，并传递参数 -->
+    <node name="listener" pkg="rospy_tutorials" type="listener" output="screen">
+        <remap from="chatter" to="my_chatter" />
+    </node>
+
+    <!-- 使用 group 标签管理节点 -->
+    <group ns="robot1">
+        <node name="controller" pkg="controller_package" type="controller_node" output="screen">
+            <param name="controller_param" value="robot1_controller_value" />
+        </node>
+    </group>
+
+    <group ns="robot2">
+        <node name="controller" pkg="controller_package" type="controller_node" output="screen">
+            <param name="controller_param" value="robot2_controller_value" />
+        </node>
+    </group>
+
+    <!-- 包含其他 launch 文件 -->
+    <include file="$(find my_robot_package)/launch/other.launch">
+        <arg name="arg_name" value="arg_value" />
+    </include>
+
+    <!-- 设置环境变量 -->
+    <env name="MY_ENV_VAR" value="some_value" />
+
+    <!-- 启动一个节点，并设置环境变量 -->
+    <node name="env_node" pkg="env_package" type="env_node" output="screen">
+        <env name="NODE_SPECIFIC_ENV_VAR" value="node_specific_value" />
+    </node>
+
+    <!-- 启动带有条件的节点 -->
+    <node if="$(arg use_camera)" name="camera_node" pkg="camera_package" type="camera_node" output="screen" />
+
+    <!-- 启动带有参数文件的节点 -->
+    <rosparam file="$(find my_robot_package)/config/controller_params.yaml" />
+
+    <!-- 使用 args 标签传递参数 -->
+    <arg name="use_camera" default="false" />
+    <arg name="camera_topic" default="/camera/image_raw" />
+
+    <!-- 启动节点并传递参数 -->
+    <node name="camera_node" pkg="camera_package" type="camera_node" output="screen">
+        <remap from="camera/image" to="$(arg camera_topic)" />
+        <param name="camera_param" value="$(arg use_camera)" />
+    </node>
+
+</launch>

@@ -87,6 +87,13 @@ add_executable(${PROJECT_NAME}_node
   src/wiremode_test.cpp
 )
 
+add_executable(pub_node
+  src/pub.cpp
+)
+add_executable(sub_node
+  src/sub.cpp
+)
+
 # add_executable(${PROJECT_NAME}_node src/control_node.cpp)
 
 ## Rename C++ executable without prefix
@@ -96,11 +103,19 @@ add_executable(${PROJECT_NAME}_node
 ## same as for the library above
 # add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(pub_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(sub_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Specify libraries to link a library or executable target against
 target_link_libraries(${PROJECT_NAME}_node
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
+)
+target_link_libraries(pub_node
+  ${catkin_LIBRARIES}
+)
+target_link_libraries(sub_node
+  ${catkin_LIBRARIES}
 )
 
 #############
